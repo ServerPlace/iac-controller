@@ -1,0 +1,9 @@
+project_id         = "<PROJECT_ID>"
+org_id             = "REPLACE_WITH_ORG_ID"
+billing_account_id = "0XXXXX-XXXXXX-XXXXXX"
+
+tf_state_bucket_name = "<STATE_BUCKET_NAME>"
+
+region = "us-central1"
+
+target_project_ids = ["<PROJECT_ID_1>","<PROJECT_ID_2>","<PROJECT_ID_3>" ]

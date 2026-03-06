@@ -1,0 +1,36 @@
+# Configuração do IaC Controller
+# Mapeado para internal/config/config.go
+
+PORT: "8080"
+GCP_PROJECT: "prj-b-cicd-f60d"
+
+# --- IAM ---
+PLAN_SERVICE_ACCOUNT: "iac-plan@prj-b-cicd-f60d.iam.gserviceaccount.com"
+APPLY_SERVICE_ACCOUNT: "iac-apply@prj-b-cicd-f60d.iam.gserviceaccount.com"
+
+# --- SCM Provider ---
+SCM_PROVIDER: "azure"
+
+# --- Secrets (Late Binding) ---
+# O prefixo _secret:// avisa o Go para buscar no Secret Manager
+JIT_SECRET_KEY: "_secret://projects/prj-b-cicd-f60d/secrets/iac-controller-jit-key/versions/latest"
+
+# --- GitHub -----
+# GITHUB_APP_ID: "_secret://gh_app_id_ref"
+# GITHUB_INSTALL_ID: "_secret://gh_install_id_ref"
+# GITHUB_PRIVATE_KEY: "_secret://gh_private_key_ref"
+# GITHUB_WEBHOOK_SECRET: "_secret://gw_webhook_ref"
+
+# --- Azure DevOps ---
+ADO_ORG_URL: "https://dev.azure.com/linuxplace"
+ADO_PROJECT: "Pipeline-IAC"
+ADO_PIPELINE_ID: "12"
+ADO_PAT: "_secret://projects/prj-b-cicd-f60d/secrets/iac-controller-ado-pat/versions/latest"
+ADO_WEBHOOK_USERNAME: "iac-webhook"
+ADO_WEBHOOK_PASSWORD: "_secret://projects/prj-b-cicd-f60d/secrets/iac-controller-azure-webhook-password/versions/latest"
+
+# --- Security ---
+security:
+  allowed_admins: ["fams@linuxplace.io","franklin@linuxplace.io","fabio@linuxplace.io","rodolfo@linuxplace.io"]
+  allowed_invokers: ["controller-invoker@prj-b-cicd-f60d.iam.gserviceaccount.com"]
+  expected_audiences: ["https://iac-controller-213706718096.us-central1.run.app","32555940559.apps.googleusercontent.com"]

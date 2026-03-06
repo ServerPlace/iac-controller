@@ -1,0 +1,35 @@
+# ID do seu projeto no Google Cloud
+project_id = "<PROJECT_ID>"
+
+#iap_support_email = "<admin@example.com>"
+
+image_tag = "<v1-xxxxxxx>"
+
+# O nome EXATO do bucket que voce criou manualmente ou via script anterior
+existing_bucket_name = "<STATE_BUCKET_NAME>"
+
+# Opcional (pois definimos default "us-central1" no variables.tf)
+region = "us-central1"
+
+admin_users = ["user@example.com", "user2@example.com"]
+
+ado_org_url = "https://dev.azure.com/<ORGANIZATION>"
+
+ado_pipeline_id = 1
+
+ado_project = "<azure_project>"
+
+# O mesmo que o cliente-ID criado no GCP
+expected_audiences = [
+  "xxxxxxxxxxxx-uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+]
+allowed_azps = [
+  "xxxxxxxxxxxx-uexxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+]
+
+# SA emails from iac-permissions stack outputs
+# Populate these after running the iac-permissions stack:
+#   plan_sa_email  = output from: terraform -chdir=iac-permissions/terraform output plan_sa_email
+#   apply_sa_email = output from: terraform -chdir=iac-permissions/terraform output apply_sa_email
+plan_sa_email  = "iac-plan@<PROJECT_ID>.iam.gserviceaccount.com"
+apply_sa_email = "iac-apply@<PROJECT_ID>.iam.gserviceaccount.com"

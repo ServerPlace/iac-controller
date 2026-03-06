@@ -1,0 +1,131 @@
+package server
+
+import (
+	"context"
+	"fmt"
+	"github.com/ServerPlace/iac-controller/internal/webhook"
+	"github.com/ServerPlace/iac-controller/internal/webhook/auth"
+	"github.com/ServerPlace/iac-controller/internal/webhook/providers"
+	"net/http"
+
+	"cloud.google.com/go/firestore"
+	"github.com/ServerPlace/iac-controller/internal/compliance"
+	"github.com/ServerPlace/iac-controller/internal/config"
+	"github.com/ServerPlace/iac-controller/internal/http/handlers"
+	"github.com/ServerPlace/iac-controller/internal/iam"
+
+	pipeline_azure "github.com/ServerPlace/iac-controller/internal/pipeline/azure"
+	fsadapter "github.com/ServerPlace/iac-controller/internal/storage/firestore"
+
+	"github.com/ServerPlace/iac-controller/internal/scm"
+	scm_azure "github.com/ServerPlace/iac-controller/internal/scm/azure"
+	scm_github "github.com/ServerPlace/iac-controller/internal/scm/github"
+
+	"github.com/ServerPlace/iac-controller/internal/service"
+	"github.com/ServerPlace/iac-controller/pkg/middleware"
+)
+
+type Server struct {
+	Config config.Config
+	SCM    scm.Client
+	IAM    *iam.Service
+}
+
+func New(cfg config.Config) *http.Server {
+	// 1. IAM Service
+	iamService := iam.New(cfg.PlanServiceAccount, cfg.ApplyServiceAccount)
+
+	// 2. SCM Client Factory
+	var scmClient scm.Client
+	var err error
+	ctx := context.Background()
+
+	switch cfg.SCMProvider {
+	case "azure":
+		scmClient, err = scm_azure.NewClient(ctx, cfg)
+	case "github":
+		scmClient, err = scm_github.NewClient(ctx, cfg)
+	default:
+		panic(fmt.Sprintf("ERRO CRÍTICO: Provider SCM '%s' não suportado.", cfg.SCMProvider))
+	}
+
+	if err != nil {
+		panic(fmt.Sprintf("Falha ao inicializar cliente SCM: %v", err))
+	}
+
+	// 3. Firestore Client
+	fsClient, err := firestore.NewClient(ctx, cfg.GCPProject)
+	if err != nil {
+		panic(fmt.Sprintf("Falha ao conectar no Firestore: %v", err))
+	}
+
+	// 4. Adapters
+	storageAdapter := fsadapter.New(fsClient)
+	pipelineAdapter := pipeline_azure.New(cfg.ADOOrgURL, cfg.ADOProject, cfg.ADOPAT, cfg.ADOPipelineID)
+
+	// --- 5. COMPLIANCE ENGINE (NOVO) ---
+	complianceEngine, err := compliance.BuildEngine(cfg.Compliance.Rules)
+	if err != nil {
+		panic(fmt.Sprintf("Falha ao inicializar motor de compliance: %v", err))
+	}
+
+	// 6. Service (Injetando dependências)
+	deployService := service.NewDeploymentService(
+		cfg,
+		scmClient,
+		pipelineAdapter,
+		storageAdapter,
+		complianceEngine,
+	)
+
+	s := &Server{
+		Config: cfg,
+		SCM:    scmClient,
+		IAM:    iamService,
+	}
+
+	// 7. Roteamento
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/healthz", s.handleHealth)
+
+	credsHandler := handlers.NewCredentialsHandler(
+		cfg,
+		storageAdapter,
+		storageAdapter,
+		scmClient,
+		iamService,
+	)
+	pipelineAuth := middleware.OIDCAuth(cfg.Security.AllowedInvokers, cfg.Security.ExpectedAudiences)
+	mux.Handle("/v1/credentials", pipelineAuth(http.HandlerFunc(credsHandler.Handle)))
+
+	adminHandler := handlers.NewAdminHandler(cfg, storageAdapter)
+	adminAuth := middleware.OIDCAuth(cfg.Security.AllowedAdmins, cfg.Security.ExpectedAudiences)
+	mux.Handle("/admin/register", adminAuth(http.HandlerFunc(adminHandler.RegisterRepo)))
+
+	// Webhook Seguro (Parametrizado)
+	// --- AZURE DEVOPS ---
+	azureAuth := auth.NewBasicAuthenticator(
+		cfg.ADOWebhookUsername, // username
+		cfg.ADOWebhookPassword, // secret do GCP
+	)
+	azureProcessor := providers.NewAzureProcessor()
+	azureHandler := &webhook.Handler{
+		Processor: azureProcessor,
+		Service:   deployService,
+		Provider:  "azure",
+	}
+
+	mux.Handle("POST /webhook/azure",
+		middleware.WebhookAuth(azureAuth)(azureHandler),
+	)
+
+	return &http.Server{
+		Handler: mux,
+	}
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
