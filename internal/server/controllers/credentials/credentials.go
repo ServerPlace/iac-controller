@@ -123,6 +123,7 @@ func (c *CredentialsController) handleApply(w http.ResponseWriter, r *http.Reque
 	pr, err := c.SCM.GetPullRequest(ctx, req.Repo, mRepoMeta.ID, prNumber)
 	if err != nil {
 		logger.Err(err).Int("pr_number", prNumber).Msg("Failed to fetch pull request from SCM.")
+		logger.Debug().Err(err).Int("pr_number", prNumber).Str("repo", req.Repo).Str("repo_meta", mRepoMeta.ID).Msg("Failed to fetch pull request from SCM.")
 		http.Error(w, "scm error", http.StatusBadGateway)
 		return
 	}
