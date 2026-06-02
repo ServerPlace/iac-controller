@@ -149,39 +149,53 @@ func (g *GithubClient) GetPullRequest(ctx context.Context, owner, repo string, n
 	}, nil
 }
 
+const (
+	mergeableStateRetries = 3
+	mergeableStateDelay   = 2 * time.Second
+)
+
 // GetPRPolicyStatus maps GitHub's mergeable_state to PRPolicyStatus.
-// "clean" → all passing. "blocked" → branch protection not satisfied.
-// "behind" is skipped (handled by branch_up_to_date gate).
-// "unknown" returns nil so the gate degrades gracefully while GitHub computes the state.
+// "unknown" means GitHub is still computing — retried up to mergeableStateRetries times;
+// returns an error if the state never resolves (fail-closed).
 func (g *GithubClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*scm.PRPolicyStatus, error) {
-	// repo on GitHub is "owner/name" — split on "/"
 	parts := strings.SplitN(repo, "/", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("github: repo must be owner/name, got %q", repo)
 	}
 	owner, name := parts[0], parts[1]
 
-	pr, _, err := g.client.PullRequests.Get(ctx, owner, name, prNumber)
-	if err != nil {
-		return nil, err
+	for attempt := 0; attempt < mergeableStateRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(mergeableStateDelay):
+			}
+		}
+
+		pr, _, err := g.client.PullRequests.Get(ctx, owner, name, prNumber)
+		if err != nil {
+			return nil, err
+		}
+
+		switch pr.GetMergeableState() {
+		case "clean":
+			return &scm.PRPolicyStatus{AllPassing: true}, nil
+		case "blocked":
+			return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"branch protection rules not satisfied"}}, nil
+		case "dirty":
+			return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"merge conflicts"}}, nil
+		case "draft":
+			return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"PR is a draft"}}, nil
+		case "behind", "unstable":
+			return &scm.PRPolicyStatus{AllPassing: true}, nil
+		case "unknown":
+			// GitHub is still computing — retry
+			continue
+		}
 	}
 
-	switch pr.GetMergeableState() {
-	case "clean":
-		return &scm.PRPolicyStatus{AllPassing: true}, nil
-	case "blocked":
-		return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"branch protection rules not satisfied"}}, nil
-	case "dirty":
-		return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"merge conflicts"}}, nil
-	case "draft":
-		return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"PR is a draft"}}, nil
-	case "behind", "unstable":
-		// "behind" is covered by branch_up_to_date; "unstable" = non-required checks
-		return &scm.PRPolicyStatus{AllPassing: true}, nil
-	default:
-		// "unknown" — GitHub hasn't computed the state yet; degrade gracefully
-		return nil, nil
-	}
+	return nil, fmt.Errorf("github: mergeable_state still unknown after %d attempts", mergeableStateRetries)
 }
 
 func (g *GithubClient) MergePR(ctx context.Context, owner, repo string, number int, headSHA string) error {

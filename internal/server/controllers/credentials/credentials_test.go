@@ -146,6 +146,56 @@ func TestHandleApply_BranchBehind_Returns403(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+func TestHandleApply_PolicyStatusError_DeniesAccess(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := ports.NewMockRepository(ctrl)
+	mockSCM := scm.NewMockClient(ctrl)
+
+	controller := NewCredentialsController(config.Config{}, mockRepo, mockSCM, nil, defaultEngine(t))
+
+	const (
+		repoID = "repo-policy-err"
+		prNum  = 5
+		sha    = "beef00"
+	)
+
+	mockRepo.EXPECT().
+		GetRepositoryByID(gomock.Any(), repoID).
+		Return(&model.RepositoryMetadata{ID: repoID}, nil)
+
+	mockSCM.EXPECT().
+		GetPullRequest(gomock.Any(), repoID, repoID, prNum).
+		Return(&scm.PullRequest{Number: prNum, HeadSHA: sha}, nil)
+
+	mockRepo.EXPECT().
+		GetDeploymentByPR(gomock.Any(), repoID, prNum).
+		Return(nil, errors.New("not found"))
+
+	mockSCM.EXPECT().
+		GetPRPolicyStatus(gomock.Any(), repoID, prNum).
+		Return(nil, errors.New("policy api unavailable"))
+
+	// fail-closed — no CommentUpdate, no token
+
+	req := api.CredentialsRequest{
+		Mode:            api.ModeApply,
+		Repo:            repoID,
+		PRNumber:        "5",
+		HeadSHA:         sha,
+		SourceBranchSHA: sha,
+	}
+	body, _ := json.Marshal(req)
+
+	r := httptest.NewRequest(http.MethodPost, "/v1/credentials", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	controller.handleApply(w, r, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
 func TestHandleApply_BranchStatusError_DeniesAccess(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

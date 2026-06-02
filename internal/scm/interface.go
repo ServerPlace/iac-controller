@@ -67,7 +67,8 @@ type Client interface {
 	FetchRepositoryMetadata(ctx context.Context, identifier string) (*model.RepositoryMetadata, error)
 
 	// GetPRPolicyStatus returns the evaluation status of all blocking branch policies for a PR.
-	// Returns (nil, nil) when the provider does not support policy evaluation (e.g. GitHub).
+	// Implementations must resolve transient states internally (e.g. retry on GitHub "unknown").
+	// Returns a non-nil error on any failure; callers must treat errors as fail-closed.
 	GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*PRPolicyStatus, error)
 }
 

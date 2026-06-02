@@ -53,7 +53,7 @@ func (g *gBranchUpToDate) Check(_ context.Context, ac ApplyContext) (Result, err
 
 // gBranchPoliciesPassing delegates approval, work items, comment resolution and any other
 // blocking branch policy to the SCM provider's policy evaluation API.
-// Returns SeverityInfo (skip) when PolicyStatus is nil — provider doesn't support it (e.g. GitHub).
+// Returns SeverityInfo (skip) when PolicyStatus is nil — state transiently unavailable (e.g. GitHub "unknown").
 type gBranchPoliciesPassing struct{}
 
 func (g *gBranchPoliciesPassing) ID() string { return "branch_policies_passing" }

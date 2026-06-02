@@ -137,11 +137,13 @@ func (c *CredentialsController) handleApply(w http.ResponseWriter, r *http.Reque
 	// 5. Fetch registered deployment (best-effort — sha_backend_match degrades to info if nil)
 	deployment, _ := c.Persistence.GetDeploymentByPR(ctx, mRepoMeta.ID, prNumber)
 
-	// 6. Fetch branch policy evaluations (best-effort — nil when provider doesn't support it)
+	// 6. Fetch branch policy evaluations — fail closed: deny on error.
+	// (nil, nil) means the provider does not support policy evaluation → gate skips gracefully.
 	policyStatus, err := c.SCM.GetPRPolicyStatus(ctx, mRepoMeta.ID, prNumber)
 	if err != nil {
-		logger.Warn().Err(err).Msg("Failed to fetch policy status — branch_policies_passing gate will skip")
-		policyStatus = nil
+		logger.Err(err).Msg("Failed to fetch policy status.")
+		http.Error(w, "could not check branch policies", http.StatusForbidden)
+		return
 	}
 
 	// 7. Run configurable apply gates

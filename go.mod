@@ -1,6 +1,7 @@
 module github.com/ServerPlace/iac-controller
 
-go 1.24.11
+go 1.25.0
+
 
 require (
 	cloud.google.com/go/cloudtasks v1.13.6
