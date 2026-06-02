@@ -65,4 +65,14 @@ type Client interface {
 	// Aceita URI ou ID nativo como identificador
 	// Retorna RepositoryMetadata completo com ID nativo, nome, URI e metadados específicos do provider
 	FetchRepositoryMetadata(ctx context.Context, identifier string) (*model.RepositoryMetadata, error)
+
+	// GetPRPolicyStatus returns the evaluation status of all blocking branch policies for a PR.
+	// Returns (nil, nil) when the provider does not support policy evaluation (e.g. GitHub).
+	GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*PRPolicyStatus, error)
+}
+
+// PRPolicyStatus summarises branch policy evaluations for a pull request.
+type PRPolicyStatus struct {
+	AllPassing bool
+	Failing    []string // display names of blocking policies that are not passing
 }

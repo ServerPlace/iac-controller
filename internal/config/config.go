@@ -46,10 +46,15 @@ type Config struct {
 		ExpectedAudiences []string `mapstructure:"expected_audiences" validate:"required"`
 		AllowedAzps       []string `mapstructure:"allowed_azps" validate:"required"`
 	} `mapstructure:"security"`
-	// --- Compliance (NOVO) ---
+	// --- Compliance (webhook-triggered apply) ---
 	Compliance struct {
 		Rules []compliance.RuleConfig `mapstructure:"rules"`
 	} `mapstructure:"compliance"`
+
+	// --- Apply Gates (user-initiated apply credential delivery) ---
+	// When absent, defaults to {sha_stale, branch_up_to_date}.
+	// To enable pr_approved or sha_backend_match, list them explicitly here.
+	ApplyGates []compliance.RuleConfig `mapstructure:"apply_gates"`
 
 	// --- Cloud Tasks ---
 	CloudTasks struct {

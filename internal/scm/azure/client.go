@@ -14,11 +14,13 @@ import (
 	"github.com/ServerPlace/iac-controller/internal/scm"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/git"
+	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/policy"
 )
 
 type AzureClient struct {
 	Connection      *azuredevops.Connection
 	GitClient       git.Client
+	PolicyClient    policy.Client
 	Project         string
 	WebhookUsername string
 	WebhookPassword string
@@ -32,9 +34,15 @@ func NewClient(ctx context.Context, cfg config.Config) (*AzureClient, error) {
 		return nil, fmt.Errorf("failed to create azure git client: %w", err)
 	}
 
+	policyClient, err := policy.NewClient(ctx, connection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create azure policy client: %w", err)
+	}
+
 	return &AzureClient{
 		Connection:      connection,
 		GitClient:       gitClient,
+		PolicyClient:    policyClient,
 		Project:         cfg.ADOProject,
 		WebhookUsername: cfg.ADOWebhookUsername,
 		WebhookPassword: cfg.ADOWebhookPassword,
@@ -509,6 +517,41 @@ func (c *AzureClient) updateComment(ctx context.Context, repo string, prID, thre
 		},
 	})
 	return err
+}
+
+// GetPRPolicyStatus returns the evaluation status of all blocking branch policies for a PR.
+// Uses the ADO Policy Evaluations API so the controller doesn't need to replicate
+// policy configuration (minimum approvers, linked work items, etc.).
+func (c *AzureClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*scm.PRPolicyStatus, error) {
+	artifactID := fmt.Sprintf("vstfs:///Git/PullRequestId/%d", prNumber)
+	records, err := c.PolicyClient.GetPolicyEvaluations(ctx, policy.GetPolicyEvaluationsArgs{
+		Project:    &c.Project,
+		ArtifactId: &artifactID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("policy evaluations: %w", err)
+	}
+
+	status := &scm.PRPolicyStatus{AllPassing: true}
+	for _, r := range *records {
+		if r.Configuration == nil || r.Configuration.IsBlocking == nil || !*r.Configuration.IsBlocking {
+			continue
+		}
+		if r.Status == nil {
+			continue
+		}
+		if *r.Status == policy.PolicyEvaluationStatusValues.Approved ||
+			*r.Status == policy.PolicyEvaluationStatusValues.NotApplicable {
+			continue
+		}
+		status.AllPassing = false
+		name := "unknown policy"
+		if r.Configuration.Type != nil && r.Configuration.Type.DisplayName != nil {
+			name = *r.Configuration.Type.DisplayName
+		}
+		status.Failing = append(status.Failing, name)
+	}
+	return status, nil
 }
 
 func isNotFound(err error) bool {

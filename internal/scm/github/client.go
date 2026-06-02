@@ -149,6 +149,41 @@ func (g *GithubClient) GetPullRequest(ctx context.Context, owner, repo string, n
 	}, nil
 }
 
+// GetPRPolicyStatus maps GitHub's mergeable_state to PRPolicyStatus.
+// "clean" → all passing. "blocked" → branch protection not satisfied.
+// "behind" is skipped (handled by branch_up_to_date gate).
+// "unknown" returns nil so the gate degrades gracefully while GitHub computes the state.
+func (g *GithubClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*scm.PRPolicyStatus, error) {
+	// repo on GitHub is "owner/name" — split on "/"
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("github: repo must be owner/name, got %q", repo)
+	}
+	owner, name := parts[0], parts[1]
+
+	pr, _, err := g.client.PullRequests.Get(ctx, owner, name, prNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	switch pr.GetMergeableState() {
+	case "clean":
+		return &scm.PRPolicyStatus{AllPassing: true}, nil
+	case "blocked":
+		return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"branch protection rules not satisfied"}}, nil
+	case "dirty":
+		return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"merge conflicts"}}, nil
+	case "draft":
+		return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"PR is a draft"}}, nil
+	case "behind", "unstable":
+		// "behind" is covered by branch_up_to_date; "unstable" = non-required checks
+		return &scm.PRPolicyStatus{AllPassing: true}, nil
+	default:
+		// "unknown" — GitHub hasn't computed the state yet; degrade gracefully
+		return nil, nil
+	}
+}
+
 func (g *GithubClient) MergePR(ctx context.Context, owner, repo string, number int, headSHA string) error {
 	_, _, err := g.client.PullRequests.Merge(ctx, owner, repo, number, "", &github.PullRequestOptions{
 		MergeMethod: "merge",
