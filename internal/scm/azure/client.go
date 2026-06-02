@@ -388,6 +388,30 @@ func (c *AzureClient) CommentUpdate(ctx context.Context, owner, repo string, num
 	}
 }
 
+// CommentClose resolves a PR thread identified by key by setting its status to Closed.
+func (c *AzureClient) CommentClose(ctx context.Context, owner, repo string, number int, key string) error {
+	mk := botMarker(key)
+	ref, err := c.findBotCommentByMarker(ctx, repo, number, mk)
+	if err != nil {
+		return err
+	}
+	if ref == nil {
+		return nil
+	}
+
+	closed := git.CommentThreadStatusValues.Closed
+	_, err = c.GitClient.UpdateThread(ctx, git.UpdateThreadArgs{
+		RepositoryId:  &repo,
+		PullRequestId: &number,
+		ThreadId:      &ref.ThreadID,
+		Project:       &c.Project,
+		CommentThread: &git.GitPullRequestCommentThread{
+			Status: &closed,
+		},
+	})
+	return err
+}
+
 // ---- internos ----
 
 type prCommentRef struct {

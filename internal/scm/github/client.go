@@ -210,6 +210,24 @@ func (g *GithubClient) CommentUpdate(ctx context.Context, owner, repo string, nu
 	return err
 }
 
+// CommentClose marks a PR comment as applied by updating its body.
+func (g *GithubClient) CommentClose(ctx context.Context, owner, repo string, number int, key string) error {
+	mk := ghBotMarker(key)
+	commentID, body, err := g.findBotComment(ctx, owner, repo, number, mk)
+	if err != nil {
+		return err
+	}
+	if commentID == 0 {
+		return nil
+	}
+
+	// Replace the status badge with "Applied" without changing the rest of the comment.
+	updated := strings.Replace(body, "✅ **Plan Succeeded**", "🚀 **Applied**", 1)
+	updated = strings.Replace(updated, "❌ **Plan Failed**", "🚀 **Applied**", 1)
+	_, _, err = g.client.Issues.EditComment(ctx, owner, repo, commentID, &github.IssueComment{Body: &updated})
+	return err
+}
+
 func (g *GithubClient) SetStatus(ctx context.Context, owner, repo, sha string, state string, description string, targetURL string) error {
 	// Mapeamento de status genérico para GitHub
 	ghState := "pending"

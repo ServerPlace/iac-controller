@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -96,7 +97,13 @@ func (c *PlansController) ClosePlan(w http.ResponseWriter, r *http.Request) {
 		Int("pr_number", req.PRNumber).
 		Msg("Plan closed, locks released")
 
-	// 6. Enfileira merge do PR de forma assíncrona via Cloud Tasks
+	// 6. Fecha o comentário do plan no PR
+	key := fmt.Sprintf("plan-%d", req.PRNumber)
+	if err := c.SCM.CommentClose(ctx, "", deployment.RepoID, req.PRNumber, key); err != nil {
+		logger.Error().Err(err).Int("pr_number", req.PRNumber).Msg("Failed to close plan comment")
+	}
+
+	// 7. Enfileira merge do PR de forma assíncrona via Cloud Tasks
 	if c.AsyncEngine != nil {
 		delay := time.Duration(c.Config.CloudTasks.MergeDelaySeconds) * time.Second
 		logger.Info().Dur("delay", delay).Msg("async: enqueueing merge-pr")
@@ -264,8 +271,8 @@ func (c *PlansController) postPlanComment(ctx context.Context, deployment model.
 		Int("comment_length", len(comment)).
 		Msg("Posting plan comment to PR")
 
-	// Chamar SCM para criar comentário
-	if err := c.SCM.Comment(ctx, owner, repo, deployment.PRNumber, comment); err != nil {
+	key := fmt.Sprintf("plan-%d", deployment.PRNumber)
+	if err := c.SCM.CommentUpdate(ctx, owner, repo, deployment.PRNumber, key, comment); err != nil {
 		logger.Err(err).Msgf("Failed to post comment to PR: %v", comment)
 		return err
 	}
