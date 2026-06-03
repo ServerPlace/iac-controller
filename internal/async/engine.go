@@ -2,9 +2,10 @@ package async
 
 import (
 	"context"
-	"github.com/ServerPlace/iac-controller/pkg/log"
 	"net/http"
 	"time"
+
+	"github.com/ServerPlace/iac-controller/pkg/log"
 )
 
 type Engine struct {
@@ -26,6 +27,14 @@ func NewEngine(store Store, enq Enqueuer, reg *Registry, leaseTTL time.Duration)
 	}
 }
 
+// detached returns a context detached from cancellation but with an explicit
+// timeout for GCP API calls (Firestore mark operations, Cloud Tasks enqueue).
+// WithoutCancel alone is not enough — it removes the parent deadline, so without
+// a new timeout the call could hang indefinitely if the GCP API is unresponsive.
+func detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+}
+
 func (e *Engine) Kick(ctx context.Context, kind, key string, wakeNow bool, delay time.Duration) error {
 	logger := log.FromContext(ctx)
 	ref := ExecutionRef{Kind: kind, Key: key}
@@ -39,7 +48,9 @@ func (e *Engine) Kick(ctx context.Context, kind, key string, wakeNow bool, delay
 			d = 0
 		}
 		logger.Debug().Str("key", ref.Key).Dur("delay", d).Msgf("async: kicking execution")
-		return e.enq.EnqueueRun(ctx, ref, d)
+		enqCtx, cancel := detached(ctx)
+		defer cancel()
+		return e.enq.EnqueueRun(enqCtx, ref, d)
 	}
 	logger.Debug().Msgf("async: coalesced execution %s (already queued/running)", ref.Key)
 	return nil
@@ -56,7 +67,9 @@ func (e *Engine) RunOnce(ctx context.Context, ref ExecutionRef, owner string) (i
 
 	h, ok := e.registry.Get(ref.Kind)
 	if !ok {
-		_ = e.store.MarkFailed(ctx, ref, "no handler registered")
+		markCtx, cancel := detached(ctx)
+		defer cancel()
+		_ = e.store.MarkFailed(markCtx, ref, "no handler registered")
 		return http.StatusOK, nil
 	}
 
@@ -65,9 +78,10 @@ func (e *Engine) RunOnce(ctx context.Context, ref ExecutionRef, owner string) (i
 		return http.StatusInternalServerError, runErr
 	}
 
-	// Use a detached context for state transitions so that a canceled request
-	// context (Cloud Tasks timeout) doesn't silently leave the document in "running".
-	markCtx := context.WithoutCancel(ctx)
+	// Detach from the request context so that a Cloud Tasks timeout doesn't
+	// silently skip the Firestore state transition or the re-enqueue call.
+	markCtx, markCancel := detached(ctx)
+	defer markCancel()
 
 	switch outcome.Type {
 	case OutcomeDone:
