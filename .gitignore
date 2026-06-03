@@ -37,3 +37,4 @@ tmp/
 *.tfstate
 .terraform*
 provider.tf
+scripts/.env
