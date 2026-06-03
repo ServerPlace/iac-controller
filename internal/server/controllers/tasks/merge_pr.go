@@ -45,8 +45,7 @@ func (h *MergePRHandler) Run(ctx context.Context, exec async.Execution) (async.O
 				Str("deployment_id", deployment.ID).
 				Int("pr_number", deployment.PRNumber).
 				Msg("merge-pr: permanent failure, not retrying")
-			h.notifyFailure(ctx, deployment, err.Error())
-			return async.Fail(err), nil
+			return h.failWithNotify(ctx, deployment, err)
 		}
 		if exec.Attempt >= maxMergeAttempts {
 			finalErr := fmt.Errorf("merge failed after %d attempts: %w", exec.Attempt, err)
@@ -55,8 +54,7 @@ func (h *MergePRHandler) Run(ctx context.Context, exec async.Execution) (async.O
 				Str("deployment_id", deployment.ID).
 				Int("pr_number", deployment.PRNumber).
 				Msg("merge-pr: max attempts reached, giving up")
-			h.notifyFailure(ctx, deployment, finalErr.Error())
-			return async.Fail(finalErr), nil
+			return h.failWithNotify(ctx, deployment, finalErr)
 		}
 		logger.Warn().Err(err).
 			Int("attempt", exec.Attempt).
@@ -75,11 +73,15 @@ func (h *MergePRHandler) Run(ctx context.Context, exec async.Execution) (async.O
 	return async.Done("merged"), nil
 }
 
-func (h *MergePRHandler) notifyFailure(ctx context.Context, deployment *model.Deployment, reason string) {
+// failWithNotify posts a failure status and PR comment before returning Fail.
+// Use this for all permanent failures where the deployment context is available,
+// so the user always knows the merge didn't happen.
+func (h *MergePRHandler) failWithNotify(ctx context.Context, deployment *model.Deployment, err error) (async.Outcome, error) {
 	_ = h.scm.SetStatus(ctx, "", deployment.RepoID, deployment.SourceBranchSHA,
 		"failure", "Merge automático falhou", "")
 	body := fmt.Sprintf("## ❌ Merge automático falhou\n\n**Motivo:** %s\n\n"+
 		"O apply foi concluído com sucesso, mas o merge do PR não pôde ser realizado automaticamente.\n"+
-		"Verifique o motivo acima e faça o merge manualmente.", reason)
+		"Verifique o motivo acima e faça o merge manualmente.", err.Error())
 	_ = h.scm.CommentUpdate(ctx, "", deployment.RepoID, deployment.PRNumber, "merge-failure", body)
+	return async.Fail(err), nil
 }

@@ -18,6 +18,11 @@ import (
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/policy"
 )
 
+// ADO TF error codes used for precise merge retryability classification.
+const (
+	adoErrBranchModified = "TF401192" // source branch modified since last merge attempt
+)
+
 type AzureClient struct {
 	Connection      *azuredevops.Connection
 	GitClient       git.Client
@@ -325,10 +330,21 @@ func (c *AzureClient) MergePR(ctx context.Context, owner, repo string, number in
 			code = *we.StatusCode
 		}
 		mergeErr := scm.NewMergeError(err, code)
-		// TF401192: source branch modified since last merge attempt — stale plan, no point retrying.
-		if strings.Contains(err.Error(), "TF401192") {
+
+		if code == 403 {
+			// Whitelist: only known transient 403s are retryable.
+			// All other 403s (no permission, unknown) are permanent.
+			msg := strings.ToLower(err.Error())
+			mergeErr.Retryable = strings.Contains(msg, "must succeed") ||
+				strings.Contains(msg, "policy evaluation") ||
+				strings.Contains(msg, "not yet been approved")
+		}
+
+		// adoErrBranchModified: stale plan SHA — permanent regardless of HTTP code.
+		if strings.Contains(err.Error(), adoErrBranchModified) {
 			mergeErr.Retryable = false
 		}
+
 		return mergeErr
 	}
 	return nil
