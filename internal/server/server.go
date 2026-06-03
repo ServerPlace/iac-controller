@@ -320,18 +320,21 @@ func (s *Server) setupRoutes() {
 		credentials.NSPlan,
 		s.Storage,
 		s.Config.JITSecretKey,
+		s.Config.LegacyKeyFallback,
 	)
 	hmacApprove := middleware2.HMACAuth(
 		func(r api.ApproveRequest) string { return r.Repo },
 		credentials.NSApply,
 		s.Storage,
 		s.Config.JITSecretKey,
+		s.Config.LegacyKeyFallback,
 	)
 	hmacClose := middleware2.HMACAuth(
 		func(r api.ClosePlanRequest) string { return r.Repo },
 		credentials.NSApply,
 		s.Storage,
 		s.Config.JITSecretKey,
+		s.Config.LegacyKeyFallback,
 	)
 
 	// ==========================================

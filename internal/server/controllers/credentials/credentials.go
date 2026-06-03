@@ -51,7 +51,10 @@ func (c *CredentialsController) Handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	contextParams, err := credentials.FindContextParams(r.Context(), c.Persistence, req.Repo, credentials.WithNameSpace(credentials.KeyNamespace(req.Mode)))
+	contextParams, err := credentials.FindContextParams(r.Context(), c.Persistence, req.Repo,
+		credentials.WithNameSpace(credentials.KeyNamespace(req.Mode)),
+		credentials.WithLegacyFallback(c.Config.LegacyKeyFallback),
+	)
 	if err != nil {
 		logger.Err(err).Msg("Failed to get repo key.")
 		http.Error(w, "invalid json", http.StatusUnprocessableEntity)
