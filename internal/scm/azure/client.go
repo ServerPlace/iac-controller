@@ -597,13 +597,8 @@ func (c *AzureClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumb
 			policy.PolicyEvaluationStatusValues.NotApplicable:
 			// Explicitly passing — continue.
 			continue
-		case policy.PolicyEvaluationStatusValues.Running,
-			policy.PolicyEvaluationStatusValues.Queued:
+		case policy.PolicyEvaluationStatusValues.Running:
 			// Running: the pipeline that requested the token is actively evaluating.
-			// Queued: ADO re-queues all policies when any build validation starts —
-			// this is a transient side effect of the apply pipeline triggering, not a
-			// signal that something changed. New-push protection is handled by sha_stale
-			// (pipeline SHA ≠ PR HEAD → blocked before reaching this gate).
 			continue
 		}
 		// Rejected (or Broken) → blocking failure.
