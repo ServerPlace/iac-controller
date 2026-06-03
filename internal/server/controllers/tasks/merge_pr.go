@@ -2,10 +2,12 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/ServerPlace/iac-controller/internal/async"
+	"github.com/ServerPlace/iac-controller/internal/core/model"
 	"github.com/ServerPlace/iac-controller/internal/core/ports"
 	"github.com/ServerPlace/iac-controller/internal/scm"
 	"github.com/ServerPlace/iac-controller/pkg/log"
@@ -37,13 +39,24 @@ func (h *MergePRHandler) Run(ctx context.Context, exec async.Execution) (async.O
 	}
 
 	if err := h.scm.MergePR(ctx, "", deployment.RepoID, deployment.PRNumber, deployment.SourceBranchSHA); err != nil {
+		var mergeErr *scm.MergeError
+		if errors.As(err, &mergeErr) && !mergeErr.Retryable {
+			logger.Error().Err(err).
+				Str("deployment_id", deployment.ID).
+				Int("pr_number", deployment.PRNumber).
+				Msg("merge-pr: permanent failure, not retrying")
+			h.notifyFailure(ctx, deployment, err.Error())
+			return async.Fail(err), nil
+		}
 		if exec.Attempt >= maxMergeAttempts {
+			finalErr := fmt.Errorf("merge failed after %d attempts: %w", exec.Attempt, err)
 			logger.Error().Err(err).
 				Int("attempt", exec.Attempt).
 				Str("deployment_id", deployment.ID).
 				Int("pr_number", deployment.PRNumber).
 				Msg("merge-pr: max attempts reached, giving up")
-			return async.Fail(fmt.Errorf("merge failed after %d attempts: %w", exec.Attempt, err)), nil
+			h.notifyFailure(ctx, deployment, finalErr.Error())
+			return async.Fail(finalErr), nil
 		}
 		logger.Warn().Err(err).
 			Int("attempt", exec.Attempt).
@@ -60,4 +73,13 @@ func (h *MergePRHandler) Run(ctx context.Context, exec async.Execution) (async.O
 		Int("pr_number", deployment.PRNumber).
 		Msg("merge-pr: PR merged successfully")
 	return async.Done("merged"), nil
+}
+
+func (h *MergePRHandler) notifyFailure(ctx context.Context, deployment *model.Deployment, reason string) {
+	_ = h.scm.SetStatus(ctx, "", deployment.RepoID, deployment.SourceBranchSHA,
+		"failure", "Merge automático falhou", "")
+	body := fmt.Sprintf("## ❌ Merge automático falhou\n\n**Motivo:** %s\n\n"+
+		"O apply foi concluído com sucesso, mas o merge do PR não pôde ser realizado automaticamente.\n"+
+		"Verifique o motivo acima e faça o merge manualmente.", reason)
+	_ = h.scm.CommentUpdate(ctx, "", deployment.RepoID, deployment.PRNumber, "merge-failure", body)
 }

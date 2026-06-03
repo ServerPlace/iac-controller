@@ -318,7 +318,20 @@ func (c *AzureClient) MergePR(ctx context.Context, owner, repo string, number in
 			},
 		},
 	})
-	return err
+	if err != nil {
+		code := 0
+		var we azuredevops.WrappedError
+		if errors.As(err, &we) && we.StatusCode != nil {
+			code = *we.StatusCode
+		}
+		mergeErr := scm.NewMergeError(err, code)
+		// TF401192: source branch modified since last merge attempt — stale plan, no point retrying.
+		if strings.Contains(err.Error(), "TF401192") {
+			mergeErr.Retryable = false
+		}
+		return mergeErr
+	}
+	return nil
 }
 
 func (c *AzureClient) SetStatus(ctx context.Context, owner, repo, sha string, state string, description string, targetURL string) error {

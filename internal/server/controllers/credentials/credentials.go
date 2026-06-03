@@ -172,6 +172,13 @@ func (c *CredentialsController) handleApply(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// 7b. Persist the validated apply SHA so merge_pr uses it instead of the
+	// potentially stale plan-registered SHA (e.g. push with no terraform changes).
+	if deployment != nil && req.SourceBranchSHA != "" && deployment.SourceBranchSHA != req.SourceBranchSHA {
+		deployment.SourceBranchSHA = req.SourceBranchSHA
+		_ = c.Persistence.SaveDeployment(ctx, deployment)
+	}
+
 	// 8. [Future: controller-initiated flow] Validate JIT token when the controller
 	// triggered the pipeline and injected IV_JOB_ID + IV_JIT_SECRET.
 	// This path is not exercised in the current user-initiated flow (JobToken == "").
