@@ -114,8 +114,15 @@ func (s *FirestoreStore) UpsertQueued(ctx context.Context, ref async.ExecutionRe
 
 		switch async.ExecutionStatus(cur.Status) {
 		case async.ExecutionStatusQueued:
+			// Re-enqueue if forced or stale — Cloud Tasks message may have been lost.
+			stale := now.Sub(cur.UpdatedAt) > 10*time.Minute
+			if wakeNow || stale {
+				shouldEnqueue = true
+				return tx.Update(doc, []firestore.Update{
+					{Path: "updated_at", Value: now},
+				})
+			}
 			shouldEnqueue = false
-			// coalescing: nada a fazer (mantém queued)
 			return tx.Update(doc, []firestore.Update{
 				{Path: "updated_at", Value: now},
 			})
