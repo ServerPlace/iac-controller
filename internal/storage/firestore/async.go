@@ -121,7 +121,18 @@ func (s *FirestoreStore) UpsertQueued(ctx context.Context, ref async.ExecutionRe
 			})
 
 		case async.ExecutionStatusRunning:
-			// dirty=true, não enfileira.
+			if cur.LeaseUntil.IsZero() || cur.LeaseUntil.Before(now) {
+				// Lease expired — worker died without marking a final status.
+				// Reset attempt count: a new Kick() represents a new business cycle.
+				shouldEnqueue = true
+				return tx.Update(doc, []firestore.Update{
+					{Path: "status", Value: string(async.ExecutionStatusQueued)},
+					{Path: "attempt", Value: 0},
+					{Path: "dirty", Value: false},
+					{Path: "updated_at", Value: now},
+				})
+			}
+			// Lease active — mark dirty so the running worker re-queues after finishing.
 			shouldEnqueue = false
 			return tx.Update(doc, []firestore.Update{
 				{Path: "dirty", Value: true},

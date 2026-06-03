@@ -65,22 +65,26 @@ func (e *Engine) RunOnce(ctx context.Context, ref ExecutionRef, owner string) (i
 		return http.StatusInternalServerError, runErr
 	}
 
+	// Use a detached context for state transitions so that a canceled request
+	// context (Cloud Tasks timeout) doesn't silently leave the document in "running".
+	markCtx := context.WithoutCancel(ctx)
+
 	switch outcome.Type {
 	case OutcomeDone:
-		_ = e.store.MarkDone(ctx, ref, outcome.Checkpoint)
+		_ = e.store.MarkDone(markCtx, ref, outcome.Checkpoint)
 		return http.StatusOK, nil
 
 	case OutcomeWait:
 		wakeAt := time.Now().Add(outcome.Delay)
-		_ = e.store.MarkWaiting(ctx, ref, wakeAt, outcome.Reason, outcome.Checkpoint)
-		_ = e.enq.EnqueueRun(ctx, ref, outcome.Delay)
+		_ = e.store.MarkWaiting(markCtx, ref, wakeAt, outcome.Reason, outcome.Checkpoint)
+		_ = e.enq.EnqueueRun(markCtx, ref, outcome.Delay)
 		return http.StatusOK, nil
 
 	case OutcomeRetry:
 		return http.StatusInternalServerError, outcome.Err
 
 	case OutcomeFail:
-		_ = e.store.MarkFailed(ctx, ref, outcome.Err.Error())
+		_ = e.store.MarkFailed(markCtx, ref, outcome.Err.Error())
 		return http.StatusOK, nil
 	}
 
