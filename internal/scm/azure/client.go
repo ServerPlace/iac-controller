@@ -523,8 +523,8 @@ func (c *AzureClient) updateComment(ctx context.Context, repo string, prID, thre
 // Uses the ADO Policy Evaluations API so the controller doesn't need to replicate
 // policy configuration (minimum approvers, linked work items, etc.).
 func (c *AzureClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*scm.PRPolicyStatus, error) {
-	// The Policy Evaluations API requires the full artifact ID:
-	// vstfs:///Git/PullRequestId/<project-guid>/<repo-guid>/<pr-number>
+	// Policy Evaluations API requires: vstfs:///CodeReview/CodeReviewId/{projectId}/{pullRequestId}
+	// See: https://learn.microsoft.com/en-us/rest/api/azure/devops/policy/evaluations/list
 	repoInfo, err := c.GitClient.GetRepository(ctx, git.GetRepositoryArgs{
 		Project:      &c.Project,
 		RepositoryId: &repo,
@@ -536,7 +536,7 @@ func (c *AzureClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumb
 	if repoInfo.Project != nil && repoInfo.Project.Id != nil {
 		projectID = repoInfo.Project.Id.String()
 	}
-	artifactID := fmt.Sprintf("vstfs:///Git/PullRequestId/%s/%s/%d", projectID, repo, prNumber)
+	artifactID := fmt.Sprintf("vstfs:///CodeReview/CodeReviewId/%s/%d", projectID, prNumber)
 	records, err := c.PolicyClient.GetPolicyEvaluations(ctx, policy.GetPolicyEvaluationsArgs{
 		Project:    &c.Project,
 		ArtifactId: &artifactID,
