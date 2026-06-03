@@ -161,7 +161,13 @@ func (c *CredentialsController) handleApply(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		report := compliance.GenerateReport(results, false)
 		_ = c.SCM.CommentUpdate(ctx, mRepoMeta.ID, mRepoMeta.ID, prNumber, "apply-gate", report)
-		logger.Warn().Int("pr_number", prNumber).Msg("Apply gate blocked credential issuance")
+		ev := logger.Warn().Int("pr_number", prNumber)
+		for _, r := range results {
+			if !r.Passed && r.Severity == compliance.SeverityStop {
+				ev = ev.Str("gate_"+r.RuleID, r.Message)
+			}
+		}
+		ev.Msg("Apply gate blocked credential issuance")
 		http.Error(w, "apply gate failed", http.StatusForbidden)
 		return
 	}

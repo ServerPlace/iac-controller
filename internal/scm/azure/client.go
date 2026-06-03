@@ -547,22 +547,38 @@ func (c *AzureClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumb
 
 	status := &scm.PRPolicyStatus{AllPassing: true}
 	for _, r := range *records {
-		if r.Configuration == nil || r.Configuration.IsBlocking == nil || !*r.Configuration.IsBlocking {
+		cfg := r.Configuration
+		if cfg == nil || cfg.IsBlocking == nil || !*cfg.IsBlocking {
+			continue
+		}
+		// Skip disabled or soft-deleted policies — they don't enforce anything.
+		if cfg.IsEnabled != nil && !*cfg.IsEnabled {
+			continue
+		}
+		if cfg.IsDeleted != nil && *cfg.IsDeleted {
 			continue
 		}
 		if r.Status == nil {
 			continue
 		}
-		if *r.Status == policy.PolicyEvaluationStatusValues.Approved ||
-			*r.Status == policy.PolicyEvaluationStatusValues.NotApplicable {
+		s := *r.Status
+		switch s {
+		case policy.PolicyEvaluationStatusValues.Approved,
+			policy.PolicyEvaluationStatusValues.NotApplicable:
+			// Explicitly passing — continue.
+			continue
+		case policy.PolicyEvaluationStatusValues.Running:
+			// Policy is actively evaluating right now — this is the pipeline that
+			// requested the token triggering the re-evaluation; don't block.
 			continue
 		}
+		// Rejected (or Broken) → blocking failure.
 		status.AllPassing = false
 		name := "unknown policy"
-		if r.Configuration.Type != nil && r.Configuration.Type.DisplayName != nil {
-			name = *r.Configuration.Type.DisplayName
+		if cfg.Type != nil && cfg.Type.DisplayName != nil {
+			name = *cfg.Type.DisplayName
 		}
-		status.Failing = append(status.Failing, name)
+		status.Failing = append(status.Failing, fmt.Sprintf("%s (%s)", name, s))
 	}
 	return status, nil
 }
