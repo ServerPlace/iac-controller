@@ -160,6 +160,17 @@ func (c *PlansController) RegisterPlan(w http.ResponseWriter, r *http.Request) {
 	var deployment *model.Deployment
 	existing, err := c.Persistence.GetDeploymentByPR(ctx, repo.ID, req.PRNumber)
 
+	if err != nil && len(req.Stacks) == 0 {
+		// No existing deployment and no stacks — this is a SHA-sync call from a
+		// no-terraform-change push. Nothing to create; skip silently.
+		logger.Info().Int("pr_number", req.PRNumber).Msg("RegisterPlan: no existing deployment and empty stacks — skipping")
+		httputil.RespondJSON(w, http.StatusOK, api.RegisterPlanResponse{
+			Status:  "skipped",
+			Message: "no existing deployment for this PR — SHA sync skipped",
+		})
+		return
+	}
+
 	if err == nil {
 		// Deployment EXISTE - ATUALIZAR
 		if existing.SourceBranch != req.SourceBranch {
