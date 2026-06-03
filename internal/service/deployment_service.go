@@ -39,6 +39,10 @@ func NewDeploymentService(
 }
 
 func (s *DeploymentService) RunApply(ctx context.Context, repoID string, prNum int, user string) error {
+	// Controller-initiated apply is not yet active — pipeline ID is global and does not
+	// support per-repository pipelines. Remove this return when the flow is ready.
+	return nil
+
 	// 1. Dados do PR
 	pr, err := s.scm.GetPullRequest(ctx, repoID, repoID, prNum)
 	if err != nil {
