@@ -41,6 +41,7 @@ variable "plan_roles" {
     "roles/cloudkms.viewer",
     "roles/compute.networkViewer",
     "roles/iam.securityReviewer",
+    "roles/secretmanager.secretAccessor",
     "roles/serviceusage.serviceUsageConsumer",
     "roles/viewer",
   ]
@@ -72,6 +73,7 @@ variable "plan_org_roles" {
     "roles/serviceusage.serviceUsageConsumer",
     "roles/compute.networkUser",
     "roles/iam.serviceAccountUser",
+    "roles/storage.bucketViewer",
   ]
 }
 

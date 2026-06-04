@@ -114,14 +114,32 @@ func (s *FirestoreStore) UpsertQueued(ctx context.Context, ref async.ExecutionRe
 
 		switch async.ExecutionStatus(cur.Status) {
 		case async.ExecutionStatusQueued:
+			// Re-enqueue if forced or stale — Cloud Tasks message may have been lost.
+			stale := now.Sub(cur.UpdatedAt) > 10*time.Minute
+			if wakeNow || stale {
+				shouldEnqueue = true
+				return tx.Update(doc, []firestore.Update{
+					{Path: "updated_at", Value: now},
+				})
+			}
 			shouldEnqueue = false
-			// coalescing: nada a fazer (mantém queued)
 			return tx.Update(doc, []firestore.Update{
 				{Path: "updated_at", Value: now},
 			})
 
 		case async.ExecutionStatusRunning:
-			// dirty=true, não enfileira.
+			if cur.LeaseUntil.IsZero() || cur.LeaseUntil.Before(now) {
+				// Lease expired — worker died without marking a final status.
+				// Reset attempt count: a new Kick() represents a new business cycle.
+				shouldEnqueue = true
+				return tx.Update(doc, []firestore.Update{
+					{Path: "status", Value: string(async.ExecutionStatusQueued)},
+					{Path: "attempt", Value: 0},
+					{Path: "dirty", Value: false},
+					{Path: "updated_at", Value: now},
+				})
+			}
+			// Lease active — mark dirty so the running worker re-queues after finishing.
 			shouldEnqueue = false
 			return tx.Update(doc, []firestore.Update{
 				{Path: "dirty", Value: true},

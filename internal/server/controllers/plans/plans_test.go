@@ -49,10 +49,10 @@ func TestRegisterPlan_NewDeployment_PostsComment(t *testing.T) {
 			return nil
 		})
 
-	// Mock: SCM comment succeeds
+	// Mock: SCM comment upsert succeeds
 	mockSCM.EXPECT().
-		Comment(gomock.Any(), "", "test-repo", 42, gomock.Any()).
-		DoAndReturn(func(ctx context.Context, owner, repo string, number int, body string) error {
+		CommentUpdate(gomock.Any(), "", "test-repo", 42, "plan-42", gomock.Any()).
+		DoAndReturn(func(ctx context.Context, owner, repo string, number int, key, body string) error {
 			assert.Contains(t, body, "✅ **Plan Succeeded**")
 			assert.Contains(t, body, "prod/vpc")
 			assert.Contains(t, body, "prod/compute")
@@ -140,10 +140,10 @@ func TestRegisterPlan_UpdateExisting_PostsNewComment(t *testing.T) {
 			return nil
 		})
 
-	// Mock: SCM comment succeeds
+	// Mock: SCM comment upsert succeeds
 	mockSCM.EXPECT().
-		Comment(gomock.Any(), "", "test-repo", 42, gomock.Any()).
-		DoAndReturn(func(ctx context.Context, owner, repo string, number int, body string) error {
+		CommentUpdate(gomock.Any(), "", "test-repo", 42, "plan-42", gomock.Any()).
+		DoAndReturn(func(ctx context.Context, owner, repo string, number int, key, body string) error {
 			assert.Contains(t, body, "Plan Version:** `#4`")
 			return nil
 		})
@@ -198,9 +198,9 @@ func TestRegisterPlan_SCMFailure_StillSucceeds(t *testing.T) {
 		SaveDeployment(gomock.Any(), gomock.Any()).
 		Return(nil)
 
-	// Mock: SCM comment FAILS
+	// Mock: SCM comment upsert FAILS
 	mockSCM.EXPECT().
-		Comment(gomock.Any(), "", "test-repo", 42, gomock.Any()).
+		CommentUpdate(gomock.Any(), "", "test-repo", 42, "plan-42", gomock.Any()).
 		Return(errors.New("Azure DevOps API timeout"))
 
 	reqBody := api.RegisterPlanRequest{

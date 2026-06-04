@@ -52,6 +52,10 @@ type Client interface {
 	// If a previous comment with the same key exists it is updated; otherwise a new one is created.
 	CommentUpdate(ctx context.Context, owner, repo string, number int, key, body string) error
 
+	// CommentClose resolves/closes a PR comment identified by key.
+	// Azure: marks the thread as Closed. GitHub: updates the comment body to show it was applied.
+	CommentClose(ctx context.Context, owner, repo string, number int, key string) error
+
 	SetStatus(ctx context.Context, owner, repo, sha string, state string, description string, targetURL string) error
 
 	// MergePR completa (merge) o pull request especificado
@@ -61,4 +65,15 @@ type Client interface {
 	// Aceita URI ou ID nativo como identificador
 	// Retorna RepositoryMetadata completo com ID nativo, nome, URI e metadados específicos do provider
 	FetchRepositoryMetadata(ctx context.Context, identifier string) (*model.RepositoryMetadata, error)
+
+	// GetPRPolicyStatus returns the evaluation status of all blocking branch policies for a PR.
+	// Implementations must resolve transient states internally (e.g. retry on GitHub "unknown").
+	// Returns a non-nil error on any failure; callers must treat errors as fail-closed.
+	GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*PRPolicyStatus, error)
+}
+
+// PRPolicyStatus summarises branch policy evaluations for a pull request.
+type PRPolicyStatus struct {
+	AllPassing bool
+	Failing    []string // display names of blocking policies that are not passing
 }

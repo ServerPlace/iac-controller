@@ -70,6 +70,20 @@ func (mr *MockClientMockRecorder) Comment(ctx, owner, repo, number, body any) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Comment", reflect.TypeOf((*MockClient)(nil).Comment), ctx, owner, repo, number, body)
 }
 
+// CommentClose mocks base method.
+func (m *MockClient) CommentClose(ctx context.Context, owner, repo string, number int, key string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CommentClose", ctx, owner, repo, number, key)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CommentClose indicates an expected call of CommentClose.
+func (mr *MockClientMockRecorder) CommentClose(ctx, owner, repo, number, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommentClose", reflect.TypeOf((*MockClient)(nil).CommentClose), ctx, owner, repo, number, key)
+}
+
 // CommentUpdate mocks base method.
 func (m *MockClient) CommentUpdate(ctx context.Context, owner, repo string, number int, key, body string) error {
 	m.ctrl.T.Helper()
@@ -97,6 +111,21 @@ func (m *MockClient) FetchRepositoryMetadata(ctx context.Context, identifier str
 func (mr *MockClientMockRecorder) FetchRepositoryMetadata(ctx, identifier any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchRepositoryMetadata", reflect.TypeOf((*MockClient)(nil).FetchRepositoryMetadata), ctx, identifier)
+}
+
+// GetPRPolicyStatus mocks base method.
+func (m *MockClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*PRPolicyStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPRPolicyStatus", ctx, repo, prNumber)
+	ret0, _ := ret[0].(*PRPolicyStatus)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPRPolicyStatus indicates an expected call of GetPRPolicyStatus.
+func (mr *MockClientMockRecorder) GetPRPolicyStatus(ctx, repo, prNumber any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPRPolicyStatus", reflect.TypeOf((*MockClient)(nil).GetPRPolicyStatus), ctx, repo, prNumber)
 }
 
 // GetPullRequest mocks base method.

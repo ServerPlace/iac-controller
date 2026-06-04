@@ -4,21 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ServerPlace/iac-controller/pkg/log"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ServerPlace/iac-controller/pkg/log"
 
 	"github.com/ServerPlace/iac-controller/internal/config"
 	"github.com/ServerPlace/iac-controller/internal/core/model"
 	"github.com/ServerPlace/iac-controller/internal/scm"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/git"
+	"github.com/microsoft/azure-devops-go-api/azuredevops/v7/policy"
+)
+
+// ADO TF error codes used for precise merge retryability classification.
+const (
+	adoErrBranchModified = "TF401192" // source branch modified since last merge attempt
 )
 
 type AzureClient struct {
 	Connection      *azuredevops.Connection
 	GitClient       git.Client
+	PolicyClient    policy.Client
 	Project         string
 	WebhookUsername string
 	WebhookPassword string
@@ -32,9 +40,15 @@ func NewClient(ctx context.Context, cfg config.Config) (*AzureClient, error) {
 		return nil, fmt.Errorf("failed to create azure git client: %w", err)
 	}
 
+	policyClient, err := policy.NewClient(ctx, connection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create azure policy client: %w", err)
+	}
+
 	return &AzureClient{
 		Connection:      connection,
 		GitClient:       gitClient,
+		PolicyClient:    policyClient,
 		Project:         cfg.ADOProject,
 		WebhookUsername: cfg.ADOWebhookUsername,
 		WebhookPassword: cfg.ADOWebhookPassword,
@@ -309,7 +323,31 @@ func (c *AzureClient) MergePR(ctx context.Context, owner, repo string, number in
 			},
 		},
 	})
-	return err
+	if err != nil {
+		code := 0
+		var we azuredevops.WrappedError
+		if errors.As(err, &we) && we.StatusCode != nil {
+			code = *we.StatusCode
+		}
+		mergeErr := scm.NewMergeError(err, code)
+
+		if code == 403 {
+			// Whitelist: only known transient 403s are retryable.
+			// All other 403s (no permission, unknown) are permanent.
+			msg := strings.ToLower(err.Error())
+			mergeErr.Retryable = strings.Contains(msg, "must succeed") ||
+				strings.Contains(msg, "policy evaluation") ||
+				strings.Contains(msg, "not yet been approved")
+		}
+
+		// adoErrBranchModified: stale plan SHA — permanent regardless of HTTP code.
+		if strings.Contains(err.Error(), adoErrBranchModified) {
+			mergeErr.Retryable = false
+		}
+
+		return mergeErr
+	}
+	return nil
 }
 
 func (c *AzureClient) SetStatus(ctx context.Context, owner, repo, sha string, state string, description string, targetURL string) error {
@@ -386,6 +424,30 @@ func (c *AzureClient) CommentUpdate(ctx context.Context, owner, repo string, num
 		}
 		return err
 	}
+}
+
+// CommentClose resolves a PR thread identified by key by setting its status to Closed.
+func (c *AzureClient) CommentClose(ctx context.Context, owner, repo string, number int, key string) error {
+	mk := botMarker(key)
+	ref, err := c.findBotCommentByMarker(ctx, repo, number, mk)
+	if err != nil {
+		return err
+	}
+	if ref == nil {
+		return nil
+	}
+
+	closed := git.CommentThreadStatusValues.Closed
+	_, err = c.GitClient.UpdateThread(ctx, git.UpdateThreadArgs{
+		RepositoryId:  &repo,
+		PullRequestId: &number,
+		ThreadId:      &ref.ThreadID,
+		Project:       &c.Project,
+		CommentThread: &git.GitPullRequestCommentThread{
+			Status: &closed,
+		},
+	})
+	return err
 }
 
 // ---- internos ----
@@ -485,6 +547,69 @@ func (c *AzureClient) updateComment(ctx context.Context, repo string, prID, thre
 		},
 	})
 	return err
+}
+
+// GetPRPolicyStatus returns the evaluation status of all blocking branch policies for a PR.
+// Uses the ADO Policy Evaluations API so the controller doesn't need to replicate
+// policy configuration (minimum approvers, linked work items, etc.).
+func (c *AzureClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*scm.PRPolicyStatus, error) {
+	// Policy Evaluations API requires: vstfs:///CodeReview/CodeReviewId/{projectId}/{pullRequestId}
+	// See: https://learn.microsoft.com/en-us/rest/api/azure/devops/policy/evaluations/list
+	repoInfo, err := c.GitClient.GetRepository(ctx, git.GetRepositoryArgs{
+		Project:      &c.Project,
+		RepositoryId: &repo,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get repository for policy check: %w", err)
+	}
+	projectID := ""
+	if repoInfo.Project != nil && repoInfo.Project.Id != nil {
+		projectID = repoInfo.Project.Id.String()
+	}
+	artifactID := fmt.Sprintf("vstfs:///CodeReview/CodeReviewId/%s/%d", projectID, prNumber)
+	records, err := c.PolicyClient.GetPolicyEvaluations(ctx, policy.GetPolicyEvaluationsArgs{
+		Project:    &c.Project,
+		ArtifactId: &artifactID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("policy evaluations: %w", err)
+	}
+
+	status := &scm.PRPolicyStatus{AllPassing: true}
+	for _, r := range *records {
+		cfg := r.Configuration
+		if cfg == nil || cfg.IsBlocking == nil || !*cfg.IsBlocking {
+			continue
+		}
+		// Skip disabled or soft-deleted policies — they don't enforce anything.
+		if cfg.IsEnabled != nil && !*cfg.IsEnabled {
+			continue
+		}
+		if cfg.IsDeleted != nil && *cfg.IsDeleted {
+			continue
+		}
+		if r.Status == nil {
+			continue
+		}
+		s := *r.Status
+		switch s {
+		case policy.PolicyEvaluationStatusValues.Approved,
+			policy.PolicyEvaluationStatusValues.NotApplicable:
+			// Explicitly passing — continue.
+			continue
+		case policy.PolicyEvaluationStatusValues.Running:
+			// Running: the pipeline that requested the token is actively evaluating.
+			continue
+		}
+		// Rejected (or Broken) → blocking failure.
+		status.AllPassing = false
+		name := "unknown policy"
+		if cfg.Type != nil && cfg.Type.DisplayName != nil {
+			name = *cfg.Type.DisplayName
+		}
+		status.Failing = append(status.Failing, fmt.Sprintf("%s (%s)", name, s))
+	}
+	return status, nil
 }
 
 func isNotFound(err error) bool {

@@ -149,6 +149,55 @@ func (g *GithubClient) GetPullRequest(ctx context.Context, owner, repo string, n
 	}, nil
 }
 
+const (
+	mergeableStateRetries = 3
+	mergeableStateDelay   = 2 * time.Second
+)
+
+// GetPRPolicyStatus maps GitHub's mergeable_state to PRPolicyStatus.
+// "unknown" means GitHub is still computing — retried up to mergeableStateRetries times;
+// returns an error if the state never resolves (fail-closed).
+func (g *GithubClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*scm.PRPolicyStatus, error) {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("github: repo must be owner/name, got %q", repo)
+	}
+	owner, name := parts[0], parts[1]
+
+	for attempt := 0; attempt < mergeableStateRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(mergeableStateDelay):
+			}
+		}
+
+		pr, _, err := g.client.PullRequests.Get(ctx, owner, name, prNumber)
+		if err != nil {
+			return nil, err
+		}
+
+		switch pr.GetMergeableState() {
+		case "clean":
+			return &scm.PRPolicyStatus{AllPassing: true}, nil
+		case "blocked":
+			return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"branch protection rules not satisfied"}}, nil
+		case "dirty":
+			return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"merge conflicts"}}, nil
+		case "draft":
+			return &scm.PRPolicyStatus{AllPassing: false, Failing: []string{"PR is a draft"}}, nil
+		case "behind", "unstable":
+			return &scm.PRPolicyStatus{AllPassing: true}, nil
+		case "unknown":
+			// GitHub is still computing — retry
+			continue
+		}
+	}
+
+	return nil, fmt.Errorf("github: mergeable_state still unknown after %d attempts", mergeableStateRetries)
+}
+
 func (g *GithubClient) MergePR(ctx context.Context, owner, repo string, number int, headSHA string) error {
 	_, _, err := g.client.PullRequests.Merge(ctx, owner, repo, number, "", &github.PullRequestOptions{
 		MergeMethod: "merge",
@@ -207,6 +256,24 @@ func (g *GithubClient) CommentUpdate(ctx context.Context, owner, repo string, nu
 
 	comment := &github.IssueComment{Body: &bodyWithMarker}
 	_, _, err = g.client.Issues.EditComment(ctx, owner, repo, commentID, comment)
+	return err
+}
+
+// CommentClose marks a PR comment as applied by updating its body.
+func (g *GithubClient) CommentClose(ctx context.Context, owner, repo string, number int, key string) error {
+	mk := ghBotMarker(key)
+	commentID, body, err := g.findBotComment(ctx, owner, repo, number, mk)
+	if err != nil {
+		return err
+	}
+	if commentID == 0 {
+		return nil
+	}
+
+	// Replace the status badge with "Applied" without changing the rest of the comment.
+	updated := strings.Replace(body, "✅ **Plan Succeeded**", "🚀 **Applied**", 1)
+	updated = strings.Replace(updated, "❌ **Plan Failed**", "🚀 **Applied**", 1)
+	_, _, err = g.client.Issues.EditComment(ctx, owner, repo, commentID, &github.IssueComment{Body: &updated})
 	return err
 }
 

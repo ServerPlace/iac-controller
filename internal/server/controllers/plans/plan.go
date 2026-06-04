@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -77,13 +78,7 @@ func (c *PlansController) ClosePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Libera locks do PR
-	if err := c.Persistence.ReleaseBatch(ctx, repo.ID, req.PRNumber); err != nil {
-		// Log mas não falha — PR já foi merged
-		logger.Error().Err(err).Int("pr_number", req.PRNumber).Msg("Failed to release locks after merge")
-	}
-
-	// 5. Atualiza status do deployment para "closed"
+	// 4. Atualiza status do deployment para "closed"
 	deployment.Status = model.DeploymentApplied
 	if err := c.Persistence.SaveDeployment(ctx, deployment); err != nil {
 		logger.Error().Err(err).Str("deployment_id", deployment.ID).Msg("Failed to update deployment status")
@@ -94,9 +89,15 @@ func (c *PlansController) ClosePlan(w http.ResponseWriter, r *http.Request) {
 	logger.Info().
 		Str("deployment_id", deployment.ID).
 		Int("pr_number", req.PRNumber).
-		Msg("Plan closed, locks released")
+		Msg("Plan closed, merge enqueued")
 
-	// 6. Enfileira merge do PR de forma assíncrona via Cloud Tasks
+	// 6. Fecha o comentário do plan no PR
+	key := fmt.Sprintf("plan-%d", req.PRNumber)
+	if err := c.SCM.CommentClose(ctx, "", deployment.RepoID, req.PRNumber, key); err != nil {
+		logger.Error().Err(err).Int("pr_number", req.PRNumber).Msg("Failed to close plan comment")
+	}
+
+	// 7. Enfileira merge do PR de forma assíncrona via Cloud Tasks
 	if c.AsyncEngine != nil {
 		delay := time.Duration(c.Config.CloudTasks.MergeDelaySeconds) * time.Second
 		logger.Info().Dur("delay", delay).Msg("async: enqueueing merge-pr")
@@ -108,7 +109,7 @@ func (c *PlansController) ClosePlan(w http.ResponseWriter, r *http.Request) {
 	httputil.RespondJSON(w, http.StatusOK, api.ClosePlanResponse{
 		DeploymentID: deployment.ID,
 		Status:       "closed",
-		Message:      "Locks released",
+		Message:      "Merge enqueued",
 	})
 }
 
@@ -152,6 +153,17 @@ func (c *PlansController) RegisterPlan(w http.ResponseWriter, r *http.Request) {
 	// 3. IDEMPOTÊNCIA: Buscar deployment existente ou criar novo
 	var deployment *model.Deployment
 	existing, err := c.Persistence.GetDeploymentByPR(ctx, repo.ID, req.PRNumber)
+
+	if err != nil && len(req.Stacks) == 0 {
+		// No existing deployment and no stacks — this is a SHA-sync call from a
+		// no-terraform-change push. Nothing to create; skip silently.
+		logger.Info().Int("pr_number", req.PRNumber).Msg("RegisterPlan: no existing deployment and empty stacks — skipping")
+		httputil.RespondJSON(w, http.StatusOK, api.RegisterPlanResponse{
+			Status:  "skipped",
+			Message: "no existing deployment for this PR — SHA sync skipped",
+		})
+		return
+	}
 
 	if err == nil {
 		// Deployment EXISTE - ATUALIZAR
@@ -264,8 +276,8 @@ func (c *PlansController) postPlanComment(ctx context.Context, deployment model.
 		Int("comment_length", len(comment)).
 		Msg("Posting plan comment to PR")
 
-	// Chamar SCM para criar comentário
-	if err := c.SCM.Comment(ctx, owner, repo, deployment.PRNumber, comment); err != nil {
+	key := fmt.Sprintf("plan-%d", deployment.PRNumber)
+	if err := c.SCM.CommentUpdate(ctx, owner, repo, deployment.PRNumber, key, comment); err != nil {
 		logger.Err(err).Msgf("Failed to post comment to PR: %v", comment)
 		return err
 	}

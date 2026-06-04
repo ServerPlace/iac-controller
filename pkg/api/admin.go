@@ -25,6 +25,20 @@ type CreateRepositoryResponse struct {
 	CreatedNew               bool   `json:"created_new"`           // true se criou novo, false se já existia
 }
 
+// UpdateRepositoryRequest é o payload para atualizar metadados de um repositório
+// PATCH /admin/repositories/{id}
+type UpdateRepositoryRequest struct {
+	KeyVersion *int `json:"key_version"` // nova versão da chave HMAC (ex: 2)
+}
+
+// UpdateRepositoryResponse retorna os dados atualizados e as novas chaves derivadas
+type UpdateRepositoryResponse struct {
+	model.RepositoryMetadata
+	PlanSecret  string `json:"plan_secret,omitempty"`
+	ApplySecret string `json:"apply_secret,omitempty"`
+	Instruction string `json:"instruction,omitempty"`
+}
+
 // ==========================================
 // ADMIN ENDPOINTS (LEGACY - deprecated)
 // ==========================================
