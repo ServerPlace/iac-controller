@@ -171,6 +171,7 @@ func (c *CredentialsController) handleApply(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "apply gate failed", http.StatusForbidden)
 		return
 	}
+	_ = c.SCM.CommentClose(ctx, mRepoMeta.ID, mRepoMeta.ID, prNumber, "apply-gate")
 
 	// 7b. Persist the validated apply SHA so merge_pr uses it instead of the
 	// potentially stale plan-registered SHA (e.g. push with no terraform changes).

@@ -284,9 +284,8 @@ func (s *Server) setupRoutes() {
 		// POST /admin/repositories - Register new repository
 		r.Post("/repositories", s.AdminController.CreateRepository)
 
-		// GET /admin/repositories - Future: List repositories
-		// GET /admin/repositories/{id} - Future: Get repository details
-		// PUT /admin/repositories/{id} - Future: Update repository metadata
+		// PATCH /admin/repositories/{id} - Update repository metadata (e.g. key_version)
+		r.Patch("/repositories/{id}", s.AdminController.UpdateRepository)
 	})
 
 	// ==========================================

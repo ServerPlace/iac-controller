@@ -66,10 +66,13 @@ func (h *MergePRHandler) Run(ctx context.Context, exec async.Execution) (async.O
 		return async.Wait(retryDelay, err.Error(), ""), nil
 	}
 
+	if err := h.persistence.ReleaseBatch(ctx, deployment.RepoID, deployment.PRNumber); err != nil {
+		logger.Error().Err(err).Int("pr_number", deployment.PRNumber).Msg("merge-pr: failed to release locks after merge")
+	}
 	logger.Info().
 		Str("deployment_id", deployment.ID).
 		Int("pr_number", deployment.PRNumber).
-		Msg("merge-pr: PR merged successfully")
+		Msg("merge-pr: PR merged and locks released")
 	return async.Done("merged"), nil
 }
 

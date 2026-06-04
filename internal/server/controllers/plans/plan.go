@@ -78,13 +78,7 @@ func (c *PlansController) ClosePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Libera locks do PR
-	if err := c.Persistence.ReleaseBatch(ctx, repo.ID, req.PRNumber); err != nil {
-		// Log mas não falha — PR já foi merged
-		logger.Error().Err(err).Int("pr_number", req.PRNumber).Msg("Failed to release locks after merge")
-	}
-
-	// 5. Atualiza status do deployment para "closed"
+	// 4. Atualiza status do deployment para "closed"
 	deployment.Status = model.DeploymentApplied
 	if err := c.Persistence.SaveDeployment(ctx, deployment); err != nil {
 		logger.Error().Err(err).Str("deployment_id", deployment.ID).Msg("Failed to update deployment status")
@@ -95,7 +89,7 @@ func (c *PlansController) ClosePlan(w http.ResponseWriter, r *http.Request) {
 	logger.Info().
 		Str("deployment_id", deployment.ID).
 		Int("pr_number", req.PRNumber).
-		Msg("Plan closed, locks released")
+		Msg("Plan closed, merge enqueued")
 
 	// 6. Fecha o comentário do plan no PR
 	key := fmt.Sprintf("plan-%d", req.PRNumber)
@@ -115,7 +109,7 @@ func (c *PlansController) ClosePlan(w http.ResponseWriter, r *http.Request) {
 	httputil.RespondJSON(w, http.StatusOK, api.ClosePlanResponse{
 		DeploymentID: deployment.ID,
 		Status:       "closed",
-		Message:      "Locks released",
+		Message:      "Merge enqueued",
 	})
 }
 
