@@ -67,9 +67,9 @@ func (e *Engine) RunOnce(ctx context.Context, ref ExecutionRef, owner string) (i
 
 	h, ok := e.registry.Get(ref.Kind)
 	if !ok {
-		markCtx, cancel := detached(ctx)
+		opCtx, cancel := detached(ctx)
 		defer cancel()
-		_ = e.store.MarkFailed(markCtx, ref, "no handler registered")
+		_, _ = e.store.MarkFailed(opCtx, ref, "no handler registered")
 		return http.StatusOK, nil
 	}
 
@@ -80,27 +80,40 @@ func (e *Engine) RunOnce(ctx context.Context, ref ExecutionRef, owner string) (i
 
 	// Detach from the request context so that a Cloud Tasks timeout doesn't
 	// silently skip the Firestore state transition or the re-enqueue call.
-	markCtx, markCancel := detached(ctx)
-	defer markCancel()
+	opCtx, cancel := detached(ctx)
+	defer cancel()
 
-	switch outcome.Type {
-	case OutcomeDone:
-		_ = e.store.MarkDone(markCtx, ref, outcome.Checkpoint)
-		return http.StatusOK, nil
-
-	case OutcomeWait:
-		wakeAt := time.Now().Add(outcome.Delay)
-		_ = e.store.MarkWaiting(markCtx, ref, wakeAt, outcome.Reason, outcome.Checkpoint)
-		_ = e.enq.EnqueueRun(markCtx, ref, outcome.Delay)
-		return http.StatusOK, nil
-
-	case OutcomeRetry:
+	// Retry is the only outcome that returns HTTP 500 — handle it first.
+	// ClearLease allows Cloud Tasks to re-deliver before the original TTL expires.
+	if outcome.Type == OutcomeRetry {
+		_ = e.store.ClearLease(opCtx, ref)
 		return http.StatusInternalServerError, outcome.Err
-
-	case OutcomeFail:
-		_ = e.store.MarkFailed(markCtx, ref, outcome.Err.Error())
-		return http.StatusOK, nil
 	}
 
-	return http.StatusInternalServerError, nil
+	// Each Mark* checks the dirty flag atomically and returns whether a Kick()
+	// arrived during execution. If so, re-enqueue immediately instead of waiting.
+	switch outcome.Type {
+	case OutcomeDone:
+		if requeue, _ := e.store.MarkDone(opCtx, ref, outcome.Checkpoint); requeue {
+			_ = e.enq.EnqueueRun(opCtx, ref, 0)
+		}
+	case OutcomeWait:
+		wakeAt := time.Now().Add(outcome.Delay)
+		if requeue, _ := e.store.MarkWaiting(opCtx, ref, wakeAt, outcome.Reason, outcome.Checkpoint); requeue {
+			// dirty=true vence o wait: executa imediatamente, sem enfileirar o delay.
+			_ = e.enq.EnqueueRun(opCtx, ref, 0)
+		} else {
+			_ = e.enq.EnqueueRun(opCtx, ref, outcome.Delay)
+		}
+	case OutcomeFail:
+		if requeue, _ := e.store.MarkFailed(opCtx, ref, outcome.Err.Error()); requeue {
+			_ = e.enq.EnqueueRun(opCtx, ref, 0)
+		}
+	default:
+		if requeue, _ := e.store.MarkFailed(opCtx, ref, "unknown outcome type"); requeue {
+			_ = e.enq.EnqueueRun(opCtx, ref, 0)
+		}
+	}
+
+	return http.StatusOK, nil
 }
