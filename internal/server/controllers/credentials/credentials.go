@@ -68,7 +68,7 @@ func (c *CredentialsController) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	valid, err := credentials.ValidateHMAC(r.Context(), expectedKey, req)
 	if err != nil || !valid {
-		ev := logger.Warn().
+		ev := logger.Error().
 			Str("hmac_ns", string(contextParams.NS)).
 			Int("key_version", contextParams.Version).
 			Bool("legacy_fallback", contextParams.LegacyFallback).
