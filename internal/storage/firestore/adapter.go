@@ -82,6 +82,27 @@ func (a *Adapter) GetRepositoryByName(ctx context.Context, name string) (*model.
 	return &r, nil
 }
 
+// ListRepositories retorna todos os repositórios registrados
+func (a *Adapter) ListRepositories(ctx context.Context) ([]model.RepositoryMetadata, error) {
+	iter := a.client.Collection(RepositoriesCollection).Documents(ctx)
+	var repos []model.RepositoryMetadata
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var r model.RepositoryMetadata
+		if err := doc.DataTo(&r); err != nil {
+			return nil, err
+		}
+		repos = append(repos, r)
+	}
+	return repos, nil
+}
+
 // GetRepositoryByURI busca repositório pela URI completa
 // Útil para migração e lookup durante transição
 func (a *Adapter) GetRepositoryByURI(ctx context.Context, uri string) (*model.RepositoryMetadata, error) {

@@ -83,6 +83,17 @@ func main() {
 		},
 	}
 
+	var cmdListRepos = &cobra.Command{
+		Use:   "list-repos",
+		Short: "Lista todos os repositórios registrados",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := ctrl.ListRepositories(); err != nil {
+				fmt.Printf("❌ Erro: %v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+
 	var cmdUpdateRepo = &cobra.Command{
 		Use:   "update-repo [repo-id]",
 		Short: "Atualiza metadados de um repositório registrado",
@@ -97,7 +108,7 @@ func main() {
 	}
 	cmdUpdateRepo.Flags().IntP("key-version", "k", 2, "Nova versão da chave HMAC")
 
-	rootCmd.AddCommand(cmdRegister, cmdUpdateRepo, cmdLogout, cmdWhoami, cmdInit)
+	rootCmd.AddCommand(cmdRegister, cmdListRepos, cmdUpdateRepo, cmdLogout, cmdWhoami, cmdInit)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

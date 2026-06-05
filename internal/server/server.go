@@ -281,6 +281,9 @@ func (s *Server) setupRoutes() {
 	// ==========================================
 	r.Route("/admin", func(r chi.Router) {
 		r.Use(oidcAdmins)
+		// GET /admin/repositories - List all registered repositories
+		r.Get("/repositories", s.AdminController.ListRepositories)
+
 		// POST /admin/repositories - Register new repository
 		r.Post("/repositories", s.AdminController.CreateRepository)
 

@@ -152,6 +152,44 @@ func (c *Client) UpdateRepository(repoID string, keyVersion int) error {
 	return nil
 }
 
+func (c *Client) ListRepositories() error {
+	token, err := c.getToken()
+	if err != nil {
+		return fmt.Errorf("erro na autenticação: %w", err)
+	}
+
+	req, err := http.NewRequest("GET", c.cfg.BackendURL+"/admin/repositories", nil)
+	if err != nil {
+		return fmt.Errorf("erro ao criar request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token.IDToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("erro na conexão: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("servidor retornou erro (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var result api.ListRepositoriesResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("erro ao decodificar resposta: %w", err)
+	}
+
+	fmt.Printf("📋 Repositórios registrados: %d\n\n", result.Total)
+	for _, r := range result.Repositories {
+		fmt.Printf("🆔 %-40s  📛 %-30s  🔗 %s\n", r.ID, r.Name, r.RepoURI)
+	}
+
+	return nil
+}
+
 func (c *Client) Logout() error {
 	err := auth.DeleteToken()
 	if err != nil && !os.IsNotExist(err) {
