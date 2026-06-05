@@ -67,14 +67,18 @@ func (c *CredentialsController) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	valid, err := credentials.ValidateHMAC(r.Context(), expectedKey, req)
-	if err != nil {
-		logger.Err(err).Msg("Failed to validate HMAC")
-		http.Error(w, "invalid json", http.StatusUnprocessableEntity)
-		return
-	}
-	if !valid {
-		logger.Warn().Msg("Invalid HMAC in credentials request.")
-		http.Error(w, "invalid json", http.StatusUnprocessableEntity)
+	if err != nil || !valid {
+		ev := logger.Warn().
+			Str("hmac_ns", string(contextParams.NS)).
+			Int("key_version", contextParams.Version).
+			Bool("legacy_fallback", contextParams.LegacyFallback).
+			Str("repo", req.Repo).
+			Str("mode", req.Mode)
+		if err != nil {
+			ev.Err(err)
+		}
+		ev.Msg("HMAC validation failed")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
