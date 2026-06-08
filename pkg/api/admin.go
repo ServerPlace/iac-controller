@@ -31,6 +31,13 @@ type UpdateRepositoryRequest struct {
 	KeyVersion *int `json:"key_version"` // nova versão da chave HMAC (ex: 2)
 }
 
+// ListRepositoriesResponse retorna a lista de repositórios registrados
+// GET /admin/repositories
+type ListRepositoriesResponse struct {
+	Repositories []model.RepositoryMetadata `json:"repositories"`
+	Total        int                        `json:"total"`
+}
+
 // UpdateRepositoryResponse retorna os dados atualizados e as novas chaves derivadas
 type UpdateRepositoryResponse struct {
 	model.RepositoryMetadata

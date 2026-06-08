@@ -227,6 +227,20 @@ func (s *FirestoreStore) AcquireLease(ctx context.Context, ref async.ExecutionRe
 			return err
 		}
 
+		// P3: estados terminais nunca re-executam — re-entrega tardia do Cloud Tasks é ignorada.
+		if cur.Status == string(async.ExecutionStatusDone) || cur.Status == string(async.ExecutionStatusFailed) {
+			acquired = false
+			out = fromFS(cur)
+			return nil
+		}
+
+		// P5: waiting ainda não venceu — evita execução prematura antes do wake_at.
+		if cur.Status == string(async.ExecutionStatusWaiting) && cur.WakeAt != nil && cur.WakeAt.After(now) {
+			acquired = false
+			out = fromFS(cur)
+			return nil
+		}
+
 		// Lease ativo?
 		if !cur.LeaseUntil.IsZero() && cur.LeaseUntil.After(now) {
 			acquired = false
@@ -237,18 +251,13 @@ func (s *FirestoreStore) AcquireLease(ctx context.Context, ref async.ExecutionRe
 		leaseUntil := now.Add(ttl)
 		newAttempt := cur.Attempt + 1
 
-		updates := []firestore.Update{
+		if err := tx.Update(doc, []firestore.Update{
 			{Path: "status", Value: string(async.ExecutionStatusRunning)},
 			{Path: "lease_owner", Value: owner},
 			{Path: "lease_until", Value: leaseUntil},
 			{Path: "attempt", Value: newAttempt},
 			{Path: "updated_at", Value: now},
-		}
-
-		// Se estava waiting e wake_at > now, ainda assim setamos running?
-		// A guarda "waiting_not_due" é aplicada depois, mas já sob lease (um runner por vez).
-		// Isso evita corrida se múltiplos ticks chegarem cedo.
-		if err := tx.Update(doc, updates); err != nil {
+		}); err != nil {
 			return err
 		}
 
@@ -265,51 +274,17 @@ func (s *FirestoreStore) AcquireLease(ctx context.Context, ref async.ExecutionRe
 	return acquired, out, err
 }
 
-func (s *FirestoreStore) MarkWaiting(ctx context.Context, ref async.ExecutionRef, wakeAt time.Time, reason string, checkpoint string) error {
-	now := s.now()
-	_, err := s.doc(ref).Update(ctx, []firestore.Update{
-		{Path: "status", Value: string(async.ExecutionStatusWaiting)},
-		{Path: "wake_at", Value: wakeAt},
-		{Path: "wait_reason", Value: reason},
-		{Path: "checkpoint", Value: checkpoint},
-		{Path: "updated_at", Value: now},
-		// Limpa o lease para que o próximo run possa adquiri-lo imediatamente.
-		{Path: "lease_until", Value: time.Time{}},
-		{Path: "lease_owner", Value: ""},
-	})
-	return err
-}
-
-func (s *FirestoreStore) MarkDone(ctx context.Context, ref async.ExecutionRef, checkpoint string) error {
-	now := s.now()
-	_, err := s.doc(ref).Update(ctx, []firestore.Update{
-		{Path: "status", Value: string(async.ExecutionStatusDone)},
-		{Path: "wake_at", Value: firestore.Delete},
-		{Path: "wait_reason", Value: ""},
-		{Path: "last_error", Value: ""},
-		{Path: "checkpoint", Value: checkpoint},
-		{Path: "updated_at", Value: now},
-	})
-	return err
-}
-
-func (s *FirestoreStore) MarkFailed(ctx context.Context, ref async.ExecutionRef, errMsg string) error {
-	now := s.now()
-	_, err := s.doc(ref).Update(ctx, []firestore.Update{
-		{Path: "status", Value: string(async.ExecutionStatusFailed)},
-		{Path: "last_error", Value: errMsg},
-		{Path: "updated_at", Value: now},
-	})
-	return err
-}
-
-func (s *FirestoreStore) FinalizeAfterRun(ctx context.Context, ref async.ExecutionRef) (bool, error) {
-	now := s.now()
+// markWithDirtyCheck é o helper central dos Mark*. Executa a transição de estado
+// em uma única transação Firestore e verifica o flag dirty atomicamente.
+// Se dirty=true, sobrescreve o destino com queued e retorna requeue=true.
+func (s *FirestoreStore) markWithDirtyCheck(
+	ctx context.Context,
+	ref async.ExecutionRef,
+	normalUpdates []firestore.Update,
+	dirtyUpdates []firestore.Update,
+) (requeue bool, err error) {
 	doc := s.doc(ref)
-
-	var shouldEnqueue bool
-
-	err := s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+	err = s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		ds, err := tx.Get(doc)
 		if err != nil {
 			return err
@@ -318,26 +293,96 @@ func (s *FirestoreStore) FinalizeAfterRun(ctx context.Context, ref async.Executi
 		if err := ds.DataTo(&cur); err != nil {
 			return err
 		}
-
 		if cur.Dirty {
-			// dirty vence wait: força queued e tick imediato.
-			shouldEnqueue = true
-			return tx.Update(doc, []firestore.Update{
-				{Path: "dirty", Value: false},
-				{Path: "status", Value: string(async.ExecutionStatusQueued)},
-				{Path: "wake_at", Value: firestore.Delete},
-				{Path: "wait_reason", Value: ""},
-				{Path: "updated_at", Value: now},
-			})
+			requeue = true
+			return tx.Update(doc, dirtyUpdates)
 		}
-
-		shouldEnqueue = false
-		return tx.Update(doc, []firestore.Update{
-			{Path: "updated_at", Value: now},
-		})
+		return tx.Update(doc, normalUpdates)
 	})
+	return requeue, err
+}
 
-	return shouldEnqueue, err
+func (s *FirestoreStore) MarkDone(ctx context.Context, ref async.ExecutionRef, checkpoint string) (bool, error) {
+	now := s.now()
+	normal := []firestore.Update{
+		{Path: "status", Value: string(async.ExecutionStatusDone)},
+		{Path: "checkpoint", Value: checkpoint},
+		{Path: "wake_at", Value: firestore.Delete},
+		{Path: "wait_reason", Value: ""},
+		{Path: "last_error", Value: ""},
+		{Path: "lease_until", Value: time.Time{}},
+		{Path: "lease_owner", Value: ""},
+		{Path: "updated_at", Value: now},
+	}
+	dirty := []firestore.Update{
+		{Path: "status", Value: string(async.ExecutionStatusQueued)},
+		{Path: "checkpoint", Value: checkpoint},
+		{Path: "wake_at", Value: firestore.Delete},
+		{Path: "wait_reason", Value: ""},
+		{Path: "last_error", Value: ""},
+		{Path: "lease_until", Value: time.Time{}},
+		{Path: "lease_owner", Value: ""},
+		{Path: "dirty", Value: false},
+		{Path: "updated_at", Value: now},
+	}
+	return s.markWithDirtyCheck(ctx, ref, normal, dirty)
+}
+
+func (s *FirestoreStore) MarkWaiting(ctx context.Context, ref async.ExecutionRef, wakeAt time.Time, reason string, checkpoint string) (bool, error) {
+	now := s.now()
+	normal := []firestore.Update{
+		{Path: "status", Value: string(async.ExecutionStatusWaiting)},
+		{Path: "wake_at", Value: wakeAt},
+		{Path: "wait_reason", Value: reason},
+		{Path: "checkpoint", Value: checkpoint},
+		{Path: "lease_until", Value: time.Time{}},
+		{Path: "lease_owner", Value: ""},
+		{Path: "updated_at", Value: now},
+	}
+	// dirty vence o wait: vai direto para queued sem setar wake_at.
+	dirty := []firestore.Update{
+		{Path: "status", Value: string(async.ExecutionStatusQueued)},
+		{Path: "checkpoint", Value: checkpoint},
+		{Path: "wake_at", Value: firestore.Delete},
+		{Path: "wait_reason", Value: ""},
+		{Path: "lease_until", Value: time.Time{}},
+		{Path: "lease_owner", Value: ""},
+		{Path: "dirty", Value: false},
+		{Path: "updated_at", Value: now},
+	}
+	return s.markWithDirtyCheck(ctx, ref, normal, dirty)
+}
+
+func (s *FirestoreStore) MarkFailed(ctx context.Context, ref async.ExecutionRef, errMsg string) (bool, error) {
+	now := s.now()
+	normal := []firestore.Update{
+		{Path: "status", Value: string(async.ExecutionStatusFailed)},
+		{Path: "last_error", Value: errMsg},
+		{Path: "lease_until", Value: time.Time{}},
+		{Path: "lease_owner", Value: ""},
+		{Path: "updated_at", Value: now},
+	}
+	dirty := []firestore.Update{
+		{Path: "status", Value: string(async.ExecutionStatusQueued)},
+		{Path: "last_error", Value: errMsg},
+		{Path: "lease_until", Value: time.Time{}},
+		{Path: "lease_owner", Value: ""},
+		{Path: "dirty", Value: false},
+		{Path: "updated_at", Value: now},
+	}
+	return s.markWithDirtyCheck(ctx, ref, normal, dirty)
+}
+
+// ClearLease zera o lease sem alterar o status — usado por OutcomeRetry para que
+// Cloud Tasks possa re-entregar antes do TTL original expirar.
+func (s *FirestoreStore) ClearLease(ctx context.Context, ref async.ExecutionRef) error {
+	now := s.now()
+	_, err := s.doc(ref).Update(ctx, []firestore.Update{
+		{Path: "lease_until", Value: time.Time{}},
+		{Path: "lease_owner", Value: ""},
+		{Path: "updated_at", Value: now},
+	})
+	return err
 }
 
 // (Opcional) utilitário de debug/observabilidade; não é parte do contrato.

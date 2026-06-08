@@ -197,6 +197,29 @@ func (c *AdminController) UpdateRepository(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// ListRepositories lista todos os repositórios registrados
+// GET /admin/repositories
+func (c *AdminController) ListRepositories(w http.ResponseWriter, r *http.Request) {
+	logger := log.FromContext(r.Context())
+
+	repos, err := c.Repo.ListRepositories(r.Context())
+	if err != nil {
+		logger.Error().Err(err).Msg("Failed to list repositories")
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	if repos == nil {
+		repos = []model.RepositoryMetadata{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.ListRepositoriesResponse{
+		Repositories: repos,
+		Total:        len(repos),
+	})
+}
+
 // fetchRepositoryMetadata é um wrapper que chama o SCM apropriado
 // Para Azure, o SCM já está configurado
 // No futuro, pode ter factory para GitHub/GitLab baseado no provider

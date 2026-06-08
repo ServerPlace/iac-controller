@@ -80,7 +80,12 @@ func HMACAuth[T hmac.Signable](
 
 			// 4. Validate HMAC (also checks timestamp internally).
 			if _, err := credentials.ValidateHMAC(ctx, key, req); err != nil {
-				logger.Warn().Err(err).Msg("HMAC validation failed")
+				logger.Warn().Err(err).
+					Str("hmac_ns", string(params.NS)).
+					Int("key_version", params.Version).
+					Bool("legacy_fallback", params.LegacyFallback).
+					Str("repo_id", repo.ID).
+					Msg("HMAC validation failed")
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
