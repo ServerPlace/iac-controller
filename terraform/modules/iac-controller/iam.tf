@@ -38,12 +38,6 @@ resource "google_cloud_run_v2_service_iam_member" "invoker_access" {
   member   = "serviceAccount:${google_service_account.invoker.email}"
 }
 
-# bind gcp service account to gke
-resource "google_service_account_iam_member" "gke_invoker_sa" {
-  service_account_id = "projects/${var.project_id}/serviceAccounts/${google_service_account.controller.email}"
-  role               = "roles/iam.workloadIdentityUser"
-  member             = "serviceAccount:${var.project_id}.svc.id.goog[azp/azp-keda]"
-}
 
 # --- 4. Storage / Firestore ---
 resource "google_project_iam_member" "controller_firestore" {
