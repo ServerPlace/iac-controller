@@ -576,7 +576,7 @@ func (c *AzureClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumb
 	}
 
 	logger := log.FromContext(ctx)
-	logger.Info().
+	logger.Debug().
 		Str("project", c.Project).
 		Str("project_id", projectID).
 		Str("artifact_id", artifactID).
@@ -584,7 +584,7 @@ func (c *AzureClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumb
 		Int("record_count", len(*records)).
 		Msg("policy evaluations: raw API response")
 	for i, r := range *records {
-		ev := logger.Info().Int("idx", i)
+		ev := logger.Debug().Int("idx", i)
 		if r.Status != nil {
 			ev = ev.Str("status", string(*r.Status))
 		}
