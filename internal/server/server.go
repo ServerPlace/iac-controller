@@ -67,6 +67,7 @@ type Server struct {
 	// Business Logic
 	DeploymentService *service.DeploymentService
 	ComplianceEngine  *compliance.Engine
+	ApplyEngine       *compliance.ApplyEngine
 
 	// Infrastructure
 	IAM      *iam.Service
@@ -182,10 +183,16 @@ func (s *Server) initDependencies(ctx context.Context) error {
 		s.Config.ADOPipelineID,
 	)
 
-	// 5. Compliance Engine
+	// 5. Compliance Engine (webhook-triggered apply)
 	s.ComplianceEngine, err = compliance.BuildEngine(s.Config.Compliance.Rules)
 	if err != nil {
 		return fmt.Errorf("failed to initialize compliance engine: %w", err)
+	}
+
+	// 5b. Apply Gates (user-initiated apply credential delivery)
+	s.ApplyEngine, err = compliance.BuildApplyEngine(s.Config.ApplyGates)
+	if err != nil {
+		return fmt.Errorf("failed to initialize apply engine: %w", err)
 	}
 
 	// 6. Business Services
@@ -208,6 +215,7 @@ func (s *Server) initControllers() {
 		s.Storage,
 		s.SCM,
 		s.IAM,
+		s.ApplyEngine,
 	)
 
 	// Admin Controller - ATUALIZADO: agora recebe SCM
@@ -273,12 +281,14 @@ func (s *Server) setupRoutes() {
 	// ==========================================
 	r.Route("/admin", func(r chi.Router) {
 		r.Use(oidcAdmins)
+		// GET /admin/repositories - List all registered repositories
+		r.Get("/repositories", s.AdminController.ListRepositories)
+
 		// POST /admin/repositories - Register new repository
 		r.Post("/repositories", s.AdminController.CreateRepository)
 
-		// GET /admin/repositories - Future: List repositories
-		// GET /admin/repositories/{id} - Future: Get repository details
-		// PUT /admin/repositories/{id} - Future: Update repository metadata
+		// PATCH /admin/repositories/{id} - Update repository metadata (e.g. key_version)
+		r.Patch("/repositories/{id}", s.AdminController.UpdateRepository)
 	})
 
 	// ==========================================
@@ -312,18 +322,21 @@ func (s *Server) setupRoutes() {
 		credentials.NSPlan,
 		s.Storage,
 		s.Config.JITSecretKey,
+		s.Config.LegacyKeyFallback,
 	)
 	hmacApprove := middleware2.HMACAuth(
 		func(r api.ApproveRequest) string { return r.Repo },
 		credentials.NSApply,
 		s.Storage,
 		s.Config.JITSecretKey,
+		s.Config.LegacyKeyFallback,
 	)
 	hmacClose := middleware2.HMACAuth(
 		func(r api.ClosePlanRequest) string { return r.Repo },
 		credentials.NSApply,
 		s.Storage,
 		s.Config.JITSecretKey,
+		s.Config.LegacyKeyFallback,
 	)
 
 	// ==========================================

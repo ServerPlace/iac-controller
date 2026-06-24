@@ -40,6 +40,9 @@ type Persistence interface {
 	// Útil para migração e lookup durante transição
 	GetRepositoryByURI(ctx context.Context, uri string) (*model.RepositoryMetadata, error)
 
+	// ListRepositories retorna todos os repositórios registrados
+	ListRepositories(ctx context.Context) ([]model.RepositoryMetadata, error)
+
 	// ==========================================
 	// LOCKS
 	// ==========================================

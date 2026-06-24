@@ -145,6 +145,21 @@ func (mr *MockRepositoryMockRecorder) GetRepositoryByURI(ctx, uri any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRepositoryByURI", reflect.TypeOf((*MockRepository)(nil).GetRepositoryByURI), ctx, uri)
 }
 
+// ListRepositories mocks base method.
+func (m *MockRepository) ListRepositories(ctx context.Context) ([]model.RepositoryMetadata, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListRepositories", ctx)
+	ret0, _ := ret[0].([]model.RepositoryMetadata)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListRepositories indicates an expected call of ListRepositories.
+func (mr *MockRepositoryMockRecorder) ListRepositories(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRepositories", reflect.TypeOf((*MockRepository)(nil).ListRepositories), ctx)
+}
+
 // Release mocks base method.
 func (m *MockRepository) Release(ctx context.Context, repo, stackPath string) error {
 	m.ctrl.T.Helper()

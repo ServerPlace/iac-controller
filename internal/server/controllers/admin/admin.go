@@ -135,6 +135,91 @@ func (c *AdminController) CreateRepository(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(resp)
 }
 
+// UpdateRepository atualiza metadados de um repositório registrado
+// PATCH /admin/repositories/{id}
+func (c *AdminController) UpdateRepository(w http.ResponseWriter, r *http.Request) {
+	logger := log.FromContext(r.Context())
+
+	repoID := r.PathValue("id")
+	if repoID == "" {
+		http.Error(w, "missing repository id", http.StatusBadRequest)
+		return
+	}
+
+	var req api.UpdateRepositoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if req.KeyVersion == nil {
+		http.Error(w, "key_version is required", http.StatusBadRequest)
+		return
+	}
+
+	existing, err := c.Repo.GetRepositoryByID(r.Context(), repoID)
+	if err != nil || existing == nil {
+		http.Error(w, "repository not found", http.StatusNotFound)
+		return
+	}
+
+	existing.KeyVersion = *req.KeyVersion
+	existing.UpdatedAt = time.Now()
+
+	if err := c.Repo.SaveRepository(r.Context(), *existing); err != nil {
+		logger.Error().Err(err).Str("repo_id", repoID).Msg("Failed to update repository")
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	pRk := credentials.NewDerivationParams(existing, credentials.WithNameSpace(credentials.NSPlan))
+	kPlan, err := credentials.DeriveRepoKeys(c.Config.JITSecretKey, *pRk)
+	if err != nil {
+		logger.Error().Err(err).Msg("Failed to derive plan key")
+		http.Error(w, "internal crypto error", http.StatusInternalServerError)
+		return
+	}
+	aRk := credentials.NewDerivationParams(existing, credentials.WithNameSpace(credentials.NSApply))
+	kApply, err := credentials.DeriveRepoKeys(c.Config.JITSecretKey, *aRk)
+	if err != nil {
+		logger.Error().Err(err).Msg("Failed to derive apply key")
+		http.Error(w, "internal crypto error", http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info().Str("repo_id", repoID).Int("key_version", *req.KeyVersion).Msg("Repository updated")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.UpdateRepositoryResponse{
+		RepositoryMetadata: *existing,
+		PlanSecret:         kPlan,
+		ApplySecret:        kApply,
+		Instruction:        "Update IAC_PLAN_KEY and IAC_APPLY_KEY in your pipeline with the new secrets.",
+	})
+}
+
+// ListRepositories lista todos os repositórios registrados
+// GET /admin/repositories
+func (c *AdminController) ListRepositories(w http.ResponseWriter, r *http.Request) {
+	logger := log.FromContext(r.Context())
+
+	repos, err := c.Repo.ListRepositories(r.Context())
+	if err != nil {
+		logger.Error().Err(err).Msg("Failed to list repositories")
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	if repos == nil {
+		repos = []model.RepositoryMetadata{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(api.ListRepositoriesResponse{
+		Repositories: repos,
+		Total:        len(repos),
+	})
+}
+
 // fetchRepositoryMetadata é um wrapper que chama o SCM apropriado
 // Para Azure, o SCM já está configurado
 // No futuro, pode ter factory para GitHub/GitLab baseado no provider

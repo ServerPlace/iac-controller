@@ -39,6 +39,7 @@ func HMACAuth[T hmac.Signable](
 	ns credentials.KeyNamespace,
 	persistence ports.Persistence,
 	masterKey string,
+	legacyFallback bool,
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +70,7 @@ func HMACAuth[T hmac.Signable](
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			params := credentials.NewDerivationParams(repo, credentials.WithNameSpace(ns))
+			params := credentials.NewDerivationParams(repo, credentials.WithNameSpace(ns), credentials.WithLegacyFallback(legacyFallback))
 			key, err := credentials.DeriveRepoKeys(masterKey, *params)
 			if err != nil {
 				logger.Err(err).Msg("Key derivation failed")
@@ -79,7 +80,12 @@ func HMACAuth[T hmac.Signable](
 
 			// 4. Validate HMAC (also checks timestamp internally).
 			if _, err := credentials.ValidateHMAC(ctx, key, req); err != nil {
-				logger.Warn().Err(err).Msg("HMAC validation failed")
+				logger.Warn().Err(err).
+					Str("hmac_ns", string(params.NS)).
+					Int("key_version", params.Version).
+					Bool("legacy_fallback", params.LegacyFallback).
+					Str("repo_id", repo.ID).
+					Msg("HMAC validation failed")
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

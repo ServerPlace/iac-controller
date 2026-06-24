@@ -9,6 +9,7 @@ import (
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	taskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"github.com/ServerPlace/iac-controller/pkg/log"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -69,7 +70,10 @@ func (e *CloudTasksEnqueuer) EnqueueRun(ctx context.Context, ref ExecutionRef, d
 	req := &taskspb.CreateTaskRequest{
 		Parent: e.queuePath(),
 		Task: &taskspb.Task{
-			MessageType: &taskspb.Task_HttpRequest{
+			// Slightly above the Cloud Run request timeout (240s) so Cloud Tasks
+			// never cancels a delivery while the handler is still running.
+			DispatchDeadline: durationpb.New(270 * time.Second),
+			MessageType:      &taskspb.Task_HttpRequest{
 				HttpRequest: &taskspb.HttpRequest{
 					HttpMethod: taskspb.HttpMethod_POST,
 					Url:        e.runURL,

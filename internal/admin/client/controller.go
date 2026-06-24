@@ -102,6 +102,94 @@ func (c *Client) RegisterRepository(identifier, provider string) error {
 	return nil
 }
 
+func (c *Client) UpdateRepository(repoID string, keyVersion int) error {
+	token, err := c.getToken()
+	if err != nil {
+		return fmt.Errorf("erro na autenticação: %w", err)
+	}
+
+	reqBody, _ := json.Marshal(api.UpdateRepositoryRequest{KeyVersion: &keyVersion})
+
+	req, err := http.NewRequest("PATCH", c.cfg.BackendURL+"/admin/repositories/"+repoID, bytes.NewBuffer(reqBody))
+	if err != nil {
+		return fmt.Errorf("erro ao criar request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token.IDToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("erro na conexão: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("servidor retornou erro (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var result api.UpdateRepositoryResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("erro ao decodificar resposta: %w", err)
+	}
+
+	fmt.Println("\n✅ Repositório Atualizado!")
+	fmt.Printf("🆔 ID:           %s\n", result.RepositoryMetadata.ID)
+	fmt.Printf("📛 Nome:         %s\n", result.RepositoryMetadata.Name)
+	fmt.Printf("🔑 Key Version:  %d\n", result.RepositoryMetadata.KeyVersion)
+	if result.PlanSecret != "" {
+		fmt.Printf("🔐 Plan Secret:  %s\n", result.PlanSecret)
+	}
+	if result.ApplySecret != "" {
+		fmt.Printf("🔐 Apply Secret: %s\n", result.ApplySecret)
+	}
+	if result.Instruction != "" {
+		fmt.Printf("\n💡 %s\n", result.Instruction)
+	}
+
+	return nil
+}
+
+func (c *Client) ListRepositories() error {
+	token, err := c.getToken()
+	if err != nil {
+		return fmt.Errorf("erro na autenticação: %w", err)
+	}
+
+	req, err := http.NewRequest("GET", c.cfg.BackendURL+"/admin/repositories", nil)
+	if err != nil {
+		return fmt.Errorf("erro ao criar request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token.IDToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("erro na conexão: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("servidor retornou erro (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var result api.ListRepositoriesResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("erro ao decodificar resposta: %w", err)
+	}
+
+	fmt.Printf("📋 Repositórios registrados: %d\n\n", result.Total)
+	for _, r := range result.Repositories {
+		fmt.Printf("🆔 %-40s  📛 %-30s  🔗 %s\n", r.ID, r.Name, r.RepoURI)
+	}
+
+	return nil
+}
+
 func (c *Client) Logout() error {
 	err := auth.DeleteToken()
 	if err != nil && !os.IsNotExist(err) {

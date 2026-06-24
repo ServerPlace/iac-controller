@@ -14,7 +14,9 @@ resource "google_cloud_tasks_queue" "async" {
     max_doublings      = 2
     max_retry_duration = "0s" # unlimited total duration
   }
-
+  stackdriver_logging_config {
+    sampling_ratio = 1.0
+  }
   depends_on = [google_project_service.apis]
 }
 

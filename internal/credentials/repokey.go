@@ -5,19 +5,21 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"strconv"
+
 	"github.com/ServerPlace/iac-controller/internal/core/model"
 	"github.com/ServerPlace/iac-controller/internal/core/ports"
 	"github.com/ServerPlace/iac-controller/pkg/log"
 	"golang.org/x/crypto/hkdf"
-	"io"
-	"strconv"
 )
 
 type KeyDerivationParams struct {
-	RepoID  string
-	NS      KeyNamespace
-	Version int
-	Extra   string
+	RepoID         string
+	NS             KeyNamespace
+	Version        int
+	Extra          string
+	LegacyFallback bool
 }
 type KeyNamespace string
 
@@ -66,18 +68,22 @@ func WithExtra(extra string) KeyDerivationOptions {
 		c.Extra = extra
 	}
 }
+
+func WithLegacyFallback(enabled bool) KeyDerivationOptions {
+	return func(c *KeyDerivationParams) {
+		c.LegacyFallback = enabled
+	}
+}
 func NewDerivationParams(metadata *model.RepositoryMetadata, opts ...KeyDerivationOptions) *KeyDerivationParams {
 	rk := defaultKeyDerivationParams(metadata)
 	for _, opt := range opts {
 		opt(rk)
 	}
-	// TODO: remover branch quando todos os repos tiverem KeyVersion > 0
-	if metadata.KeyVersion < 1 {
+	if rk.LegacyFallback || metadata.KeyVersion < 1 {
 		rkOld := defaultKeyDerivationParams(metadata)
 		rkOld.Extra = rk.Extra
 		return rkOld
 	}
-
 	return rk
 }
 
