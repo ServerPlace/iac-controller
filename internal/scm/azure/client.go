@@ -575,6 +575,49 @@ func (c *AzureClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumb
 		return nil, fmt.Errorf("policy evaluations: %w", err)
 	}
 
+	logger := log.FromContext(ctx)
+	logger.Debug().
+		Str("project", c.Project).
+		Str("project_id", projectID).
+		Str("artifact_id", artifactID).
+		Int("pr_number", prNumber).
+		Int("record_count", len(*records)).
+		Msg("policy evaluations: raw API response")
+	for i, r := range *records {
+		ev := logger.Debug().Int("idx", i)
+		if r.Status != nil {
+			ev = ev.Str("status", string(*r.Status))
+		}
+		if r.EvaluationId != nil {
+			ev = ev.Str("evaluation_id", r.EvaluationId.String())
+		}
+		if r.StartedDate != nil {
+			ev = ev.Time("started_date", r.StartedDate.Time)
+		}
+		if r.CompletedDate != nil {
+			ev = ev.Time("completed_date", r.CompletedDate.Time)
+		}
+		if cfg := r.Configuration; cfg != nil {
+			if cfg.Id != nil {
+				ev = ev.Int("config_id", *cfg.Id)
+			}
+			if cfg.Type != nil && cfg.Type.DisplayName != nil {
+				ev = ev.Str("policy", *cfg.Type.DisplayName)
+			}
+			if cfg.IsBlocking != nil {
+				ev = ev.Bool("is_blocking", *cfg.IsBlocking)
+			}
+			if cfg.IsEnabled != nil {
+				ev = ev.Bool("is_enabled", *cfg.IsEnabled)
+			}
+			if cfg.IsDeleted != nil {
+				ev = ev.Bool("is_deleted", *cfg.IsDeleted)
+			}
+		}
+		ev = ev.Interface("context", r.Context)
+		ev.Msg("policy evaluations: raw record")
+	}
+
 	status := &scm.PRPolicyStatus{AllPassing: true}
 	for _, r := range *records {
 		cfg := r.Configuration
