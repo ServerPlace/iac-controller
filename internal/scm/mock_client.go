@@ -113,6 +113,21 @@ func (mr *MockClientMockRecorder) FetchRepositoryMetadata(ctx, identifier any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchRepositoryMetadata", reflect.TypeOf((*MockClient)(nil).FetchRepositoryMetadata), ctx, identifier)
 }
 
+// GetPRPolicyStatus mocks base method.
+func (m *MockClient) GetPRPolicyStatus(ctx context.Context, repo string, prNumber int) (*PRPolicyStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPRPolicyStatus", ctx, repo, prNumber)
+	ret0, _ := ret[0].(*PRPolicyStatus)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPRPolicyStatus indicates an expected call of GetPRPolicyStatus.
+func (mr *MockClientMockRecorder) GetPRPolicyStatus(ctx, repo, prNumber any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPRPolicyStatus", reflect.TypeOf((*MockClient)(nil).GetPRPolicyStatus), ctx, repo, prNumber)
+}
+
 // GetPullRequest mocks base method.
 func (m *MockClient) GetPullRequest(ctx context.Context, owner, repo string, number int) (*PullRequest, error) {
 	m.ctrl.T.Helper()

@@ -73,6 +73,7 @@ variable "plan_org_roles" {
     "roles/serviceusage.serviceUsageConsumer",
     "roles/compute.networkUser",
     "roles/iam.serviceAccountUser",
+    "roles/storage.bucketViewer",
   ]
 }
 

@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+
 	"github.com/ServerPlace/iac-controller/internal/compliance"
 
 	"github.com/ServerPlace/iac-controller/internal/secrets"
@@ -46,10 +47,21 @@ type Config struct {
 		ExpectedAudiences []string `mapstructure:"expected_audiences" validate:"required"`
 		AllowedAzps       []string `mapstructure:"allowed_azps" validate:"required"`
 	} `mapstructure:"security"`
-	// --- Compliance (NOVO) ---
+	// --- Compliance (webhook-triggered apply) ---
 	Compliance struct {
 		Rules []compliance.RuleConfig `mapstructure:"rules"`
 	} `mapstructure:"compliance"`
+
+	// --- Apply Gates (user-initiated apply credential delivery) ---
+	// When absent, defaults to {sha_stale, branch_up_to_date}.
+	// To enable pr_approved or sha_backend_match, list them explicitly here.
+	ApplyGates []compliance.RuleConfig `mapstructure:"apply_gates"`
+
+	// --- Credentials ---
+	// When true, forces all repositories to use the global "repo" HMAC namespace
+	// regardless of KeyVersion (opt-in backward compatibility for old runners).
+	// Default false: plan/apply key separation is enforced for repos with KeyVersion >= 1.
+	LegacyKeyFallback bool `mapstructure:"legacy_key_fallback"`
 
 	// --- Cloud Tasks ---
 	CloudTasks struct {
@@ -75,6 +87,7 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	v.AutomaticEnv()
 	v.SetDefault("PORT", "8080")
 	v.SetDefault("cloud_tasks.merge_delay_seconds", 120)
+	v.SetDefault("legacy_key_fallback", false)
 
 	// O Terraform monta o arquivo em /app/config/config.yaml
 	v.AddConfigPath(dir)

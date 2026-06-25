@@ -1,13 +1,14 @@
 # 1. Definir o projeto (para garantir que vai para o lugar certo)
 export PROJECT_ID="$(gcloud config get-value project)" # Confirme se este é o ID do seu projeto
 
-export ADO_PAT="5LwoCETxxxxxx"
+export ADO_PAT
+export AZURE_WEBHOOK_PASSWORD
 
 echo -n $ADO_PAT | gcloud secrets versions add iac-controller-ado-pat \
     --project="$PROJECT_ID" \
     --data-file=-
 
-echo -n "pfPmVdJAn28hSAu7" | gcloud secrets versions add iac-controller-azure-webhook-password \
+echo -n ${AZURE_WEBHOOK_PASSWORD} | gcloud secrets versions add iac-controller-azure-webhook-password \
     --project=$PROJECT_ID \
     --data-file=-
 

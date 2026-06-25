@@ -19,16 +19,20 @@ func (e *MergeError) Error() string {
 func (e *MergeError) Unwrap() error { return e.Err }
 
 // retryableHTTPCode returns true for codes that warrant a retry.
+// ADO policy/build-validation errors surface as 400 or 403 but are temporary
+// (pipeline still running, approvals pending). Use ADO TF-error-codes for
+// precise permanent classification instead of relying solely on HTTP status.
+// retryableHTTPCode returns true for codes that are retryable by HTTP status alone.
+// For finer-grained classification (e.g. specific 403 messages), callers should
+// override Retryable after construction using an explicit whitelist.
 func retryableHTTPCode(code int) bool {
 	switch {
 	case code == 0:
 		return true // network/transport error
-	case code == 400:
-		return true // merge conflict, policy pending, pipeline running
 	case code >= 500:
 		return true // SCM unavailable
 	default:
-		return false // 401, 403, 404, etc.
+		return false // not retryable by default — caller whitelists specific cases
 	}
 }
 

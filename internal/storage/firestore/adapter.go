@@ -3,8 +3,10 @@ package firestore
 import (
 	"context"
 	"fmt"
-	"github.com/ServerPlace/iac-controller/pkg/log"
+	"strings"
 	"time"
+
+	"github.com/ServerPlace/iac-controller/pkg/log"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
@@ -78,6 +80,27 @@ func (a *Adapter) GetRepositoryByName(ctx context.Context, name string) (*model.
 		return nil, err
 	}
 	return &r, nil
+}
+
+// ListRepositories retorna todos os repositórios registrados
+func (a *Adapter) ListRepositories(ctx context.Context) ([]model.RepositoryMetadata, error) {
+	iter := a.client.Collection(RepositoriesCollection).Documents(ctx)
+	var repos []model.RepositoryMetadata
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var r model.RepositoryMetadata
+		if err := doc.DataTo(&r); err != nil {
+			return nil, err
+		}
+		repos = append(repos, r)
+	}
+	return repos, nil
 }
 
 // GetRepositoryByURI busca repositório pela URI completa
@@ -180,13 +203,21 @@ func (a *Adapter) UpdateJobStatus(ctx context.Context, jobID string, st model.Op
 // LOCKER - SEM TTL + COLEÇÃO "locks"
 // ==========================================
 
+// lockDocID returns a Firestore-safe document ID for a (repoID, stack) pair.
+// Stack paths may be absolute filesystem paths containing "/" which Firestore
+// interprets as subcollection separators — replace with a safe sequence.
+func lockDocID(repoID, stack string) string {
+	safe := strings.ReplaceAll(stack, "/", "%2F")
+	return fmt.Sprintf("%s-%s", repoID, safe)
+}
+
 // AcquireBatch tenta adquirir locks para múltiplos stacks
 // Locks NÃO expiram - só são liberados explicitamente
 func (a *Adapter) AcquireBatch(ctx context.Context, repoID string, stacks []string, user string, prNum int) error {
 	return a.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		// 1. Validação: Todos os stacks disponíveis?
 		for _, stack := range stacks {
-			lockID := fmt.Sprintf("%s-%s", repoID, stack)
+			lockID := lockDocID(repoID, stack)
 			docRef := a.client.Collection(LocksCollection).Doc(lockID)
 
 			doc, err := tx.Get(docRef)
@@ -214,7 +245,7 @@ func (a *Adapter) AcquireBatch(ctx context.Context, repoID string, stacks []stri
 		now := time.Now()
 
 		for _, stack := range stacks {
-			lockID := fmt.Sprintf("%s-%s", repoID, stack)
+			lockID := lockDocID(repoID, stack)
 			docRef := a.client.Collection(LocksCollection).Doc(lockID)
 
 			err := tx.Set(docRef, model.Lock{
@@ -234,7 +265,7 @@ func (a *Adapter) AcquireBatch(ctx context.Context, repoID string, stacks []stri
 
 // Release libera lock de um stack específico
 func (a *Adapter) Release(ctx context.Context, repoID, stackPath string) error {
-	lockID := fmt.Sprintf("%s-%s", repoID, stackPath)
+	lockID := lockDocID(repoID, stackPath)
 	_, err := a.client.Collection(LocksCollection).Doc(lockID).Delete(ctx)
 	return err
 }
